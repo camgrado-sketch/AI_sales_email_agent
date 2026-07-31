@@ -1,0 +1,6 @@
+id,name,company,position,email,industry,location,company_type
+C001,王先生,某设计事务所,设计总监,test1@example.com,酒店设计,上海,室内设计事务所
+C002,李女士,某建筑设计公司,主创建筑师,test2@example.com,办公总部设计,北京,建筑设计公司
+C003,张先生,某地产集团,商业空间采购经理,test3@example.com,商业地产,深圳,地产开发商
+C004,陈女士,某酒店管理集团,工程与设计副总监,test4@example.com,高端酒店,三亚,酒店集团
+C005,刘先生,某国际设计公司,工作场所策略顾问,test5@example.com,企业办公,上海,国际设计公司

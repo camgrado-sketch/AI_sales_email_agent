@@ -1,0 +1,26 @@
+# Environment variables (secrets)
+.env
+
+# Data files (contains real customer info and logs)
+data/customers.csv
+data/email_logs.csv
+data/reply_logs.csv
+data/drafts/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Virtual environment
+venv/
+env/
+ENV/
+.venv/
+
+# OS generated files
+.DS_Store
+Thumbs.db
