@@ -20,6 +20,9 @@ EMAIL_PASSWORD = os.getenv("EMAIL_PASSWORD") # Must be the client authorization 
 # Set to True to only allow sending to domains/emails listed in ALLOWED_TEST_EMAILS
 DEMO_MODE = True 
 ALLOWED_TEST_EMAILS = [
+    "camgrado@gmail.com",
+    "camgrado@outlook.com",
+    "cam@gradodesign.hk"
     # Add your test emails here, e.g., "test1@example.com"
 ]
 

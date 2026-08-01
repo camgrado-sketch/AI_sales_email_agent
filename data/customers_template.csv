@@ -1,6 +1,4 @@
 id,name,company,position,email,industry,location,company_type
-C001,Cam,GRADO,designer,camgrado@gmail.com,办公工装,singapore,室内设计公司
-,,,,,,,
-,,,,,,,
-,,,,,,,
-C005,刘先生,某国际设计公司,工作场所策略顾问,test5@example.com,企业办公,上海,国际设计公司
+001,王晨,字节跳动,采购经理,wang.chen.demo@bytedance.example.com,互联网科技,北京 中国,甲方（潜在客户）采购
+002,Michael Tan,Gensler,Design Director,michael.tan.demo@gensler.example.com,Architecture & Interior Design,Singapore,设计公司（办公公装项目）设计总监
+003,Sarah Williams,MillerKnoll,Sales Manager,sarah.williams.demo@millerknoll.example.com,Commercial Furniture Distribution,New York USA,经销商 销售经理
