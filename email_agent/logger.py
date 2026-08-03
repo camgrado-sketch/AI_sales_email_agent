@@ -1,34 +1,41 @@
-import csv
 import os
 from datetime import datetime
-from email_agent.config import EMAIL_LOGS_FILE, REPLY_LOGS_FILE
+
+from email_agent import config, data_store
+
 
 def init_log_files():
     """Initialize CSV log files with headers if they don't exist."""
-    # Ensure data directory exists
-    os.makedirs(os.path.dirname(EMAIL_LOGS_FILE), exist_ok=True)
-    
-    # Initialize email logs
-    if not os.path.exists(EMAIL_LOGS_FILE):
-        with open(EMAIL_LOGS_FILE, mode='w', newline='', encoding='utf-8-sig') as f:
-            writer = csv.writer(f)
-            writer.writerow(['email_id', 'customer_id', 'recipient', 'subject', 'send_time', 'status', 'error_msg'])
-            
-    # Initialize reply logs
-    if not os.path.exists(REPLY_LOGS_FILE):
-        with open(REPLY_LOGS_FILE, mode='w', newline='', encoding='utf-8-sig') as f:
-            writer = csv.writer(f)
-            writer.writerow(['email_id', 'sender', 'receive_time', 'content', 'status'])
+    os.makedirs(os.path.dirname(config.EMAIL_LOGS_FILE), exist_ok=True)
 
-def log_email_send(email_id, customer_id, recipient, subject, status, error_msg=""):
+    if not os.path.exists(config.EMAIL_LOGS_FILE):
+        data_store._write_csv(config.EMAIL_LOGS_FILE, [], config.EMAIL_LOG_HEADERS)
+
+    if not os.path.exists(config.REPLY_LOGS_FILE):
+        data_store._write_csv(config.REPLY_LOGS_FILE, [], config.REPLY_LOG_HEADERS)
+
+
+def log_email_send(email_id, customer_id, recipient, subject, status, error_msg="", message_id=""):
     """Log an email sending attempt."""
-    send_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-    with open(EMAIL_LOGS_FILE, mode='a', newline='', encoding='utf-8-sig') as f:
-        writer = csv.writer(f)
-        writer.writerow([email_id, customer_id, recipient, subject, send_time, status, error_msg])
+    send_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    data_store.append_email_log({
+        "email_id": email_id,
+        "customer_id": customer_id,
+        "recipient": recipient,
+        "subject": subject,
+        "send_time": send_time,
+        "status": status,
+        "error_msg": error_msg,
+        "message_id": message_id,
+    })
+
 
 def log_reply(email_id, sender, receive_time, content, status="replied"):
     """Log a received reply."""
-    with open(REPLY_LOGS_FILE, mode='a', newline='', encoding='utf-8-sig') as f:
-        writer = csv.writer(f)
-        writer.writerow([email_id, sender, receive_time, content, status])
+    data_store.append_reply_log({
+        "email_id": email_id,
+        "sender": sender,
+        "receive_time": receive_time,
+        "content": content,
+        "status": status,
+    })
