@@ -1,4 +1,6 @@
+import json
 import os
+import re
 
 from openai import OpenAI
 
@@ -12,6 +14,20 @@ def _get_client():
     if config.LLM_BASE_URL:
         kwargs["base_url"] = config.LLM_BASE_URL
     return OpenAI(**kwargs)
+
+
+def _is_moonshot():
+    return config.LLM_BASE_URL and "moonshot" in config.LLM_BASE_URL
+
+
+def _maybe_extract_json(text):
+    """Extract JSON from markdown code block or plain text."""
+    if not text:
+        return text
+    match = re.search(r"```(?:json)?\s*([\s\S]*?)\s*```", text)
+    if match:
+        return match.group(1).strip()
+    return text.strip()
 
 
 def complete(system_prompt, user_prompt, response_format=None, temperature=0.7):
@@ -36,20 +52,29 @@ def complete(system_prompt, user_prompt, response_format=None, temperature=0.7):
     client = _get_client()
     # Moonshot API only accepts temperature=1 for some models
     effective_temperature = temperature
-    if config.LLM_BASE_URL and "moonshot" in config.LLM_BASE_URL:
+    if _is_moonshot():
         effective_temperature = 1.0
+
     messages = [
         {"role": "system", "content": system_prompt},
         {"role": "user", "content": user_prompt},
     ]
+
+    create_kwargs = {
+        "model": config.LLM_MODEL,
+        "messages": messages,
+        "temperature": effective_temperature,
+    }
+    # Moonshot does not support json_schema response_format
+    if response_format and not _is_moonshot():
+        create_kwargs["response_format"] = response_format
+
     try:
-        response = client.chat.completions.create(
-            model=config.LLM_MODEL,
-            messages=messages,
-            temperature=effective_temperature,
-            response_format=response_format,
-        )
-        return response.choices[0].message.content
+        response = client.chat.completions.create(**create_kwargs)
+        content = response.choices[0].message.content
+        if content is None:
+            content = ""
+        return content
     except Exception as e:
         raise RuntimeError(f"LLM API call failed: {e}") from e
 
@@ -57,6 +82,7 @@ def complete(system_prompt, user_prompt, response_format=None, temperature=0.7):
 def complete_json(system_prompt, user_prompt, schema, temperature=0.7):
     """
     Convenience wrapper that forces JSON output via response_format.
+    Falls back to prompt-based JSON for Moonshot API.
 
     Args:
         system_prompt: System message content.
@@ -67,6 +93,21 @@ def complete_json(system_prompt, user_prompt, schema, temperature=0.7):
     Returns:
         Raw JSON string from the model.
     """
+    if _is_moonshot():
+        schema_text = json.dumps(schema, ensure_ascii=False, indent=2)
+        augmented_system = (
+            f"{system_prompt}\n\n"
+            f"You MUST respond with a JSON object matching this schema:\n{schema_text}\n"
+            "Return ONLY the JSON object. Do not wrap it in markdown code blocks."
+        )
+        raw = complete(augmented_system, user_prompt, response_format=None, temperature=temperature)
+        raw = _maybe_extract_json(raw)
+        try:
+            json.loads(raw)
+        except json.JSONDecodeError as e:
+            raise RuntimeError(f"LLM returned invalid JSON: {e}\nRaw response:\n{raw}") from e
+        return raw
+
     response_format = {
         "type": "json_schema",
         "json_schema": {
