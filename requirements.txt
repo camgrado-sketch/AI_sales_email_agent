@@ -1,1 +1,4 @@
 python-dotenv==1.2.2
+openai==1.46.0
+pyyaml==6.0.2
+dnspython==2.6.1
