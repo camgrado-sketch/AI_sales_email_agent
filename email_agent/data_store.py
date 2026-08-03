@@ -170,12 +170,20 @@ def save_settings(settings):
 # ------------------------------------------------------------------------------
 
 def delete_draft(draft_id):
-    """Remove a single draft by draft_id from drafts.json."""
+    """Remove a single draft by draft_id from drafts.json and from generation state."""
     drafts = load_drafts()
+    target = next((d for d in drafts if d.get("draft_id") == draft_id), None)
     drafts = [d for d in drafts if d.get("draft_id") != draft_id]
     save_drafts(drafts)
+    if target:
+        customer_id = target.get("customer_id")
+        if customer_id:
+            processed_ids = load_generation_state()
+            processed_ids.discard(customer_id)
+            save_generation_state(processed_ids)
 
 
 def clear_drafts():
-    """Remove all drafts from drafts.json."""
+    """Remove all drafts and reset generation state so generation can start fresh."""
     save_drafts([])
+    clear_generation_state()
