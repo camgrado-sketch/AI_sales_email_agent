@@ -34,6 +34,10 @@ def complete(system_prompt, user_prompt, response_format=None, temperature=0.7):
         raise RuntimeError("LLM_API_KEY is not set in .env")
 
     client = _get_client()
+    # Moonshot API only accepts temperature=1 for some models
+    effective_temperature = temperature
+    if config.LLM_BASE_URL and "moonshot" in config.LLM_BASE_URL:
+        effective_temperature = 1.0
     messages = [
         {"role": "system", "content": system_prompt},
         {"role": "user", "content": user_prompt},
@@ -42,7 +46,7 @@ def complete(system_prompt, user_prompt, response_format=None, temperature=0.7):
         response = client.chat.completions.create(
             model=config.LLM_MODEL,
             messages=messages,
-            temperature=temperature,
+            temperature=effective_temperature,
             response_format=response_format,
         )
         return response.choices[0].message.content
