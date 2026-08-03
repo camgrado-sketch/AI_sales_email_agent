@@ -28,7 +28,8 @@ def _write_csv(path, rows, fieldnames):
 
 def load_customers():
     """Load customer master data from customers.csv."""
-    return _read_csv(os.path.join(config.DATA_DIR, "customers.csv"))
+    rows = _read_csv(os.path.join(config.DATA_DIR, "customers.csv"))
+    return [r for r in rows if (r.get("id") or "").strip() or (r.get("name") or "").strip()]
 
 
 def load_email_logs():
@@ -107,3 +108,30 @@ def append_reply_log(row):
 def generate_draft_id(customer_id):
     """Generate a unique draft_id based on date and customer_id."""
     return f"{datetime.now().strftime('%Y%m%d%H%M%S')}-{customer_id}"
+
+
+# ------------------------------------------------------------------------------
+# Generation pause/resume state
+# ------------------------------------------------------------------------------
+_GENERATION_STATE_FILE = os.path.join(config.DATA_DIR, "generation_state.json")
+
+
+def load_generation_state():
+    """Load the set of already-processed customer_ids from generation_state.json."""
+    if not os.path.exists(_GENERATION_STATE_FILE):
+        return set()
+    with open(_GENERATION_STATE_FILE, "r", encoding="utf-8") as f:
+        return set(json.load(f))
+
+
+def save_generation_state(processed_ids):
+    """Persist the set of processed customer_ids to generation_state.json."""
+    _ensure_dir(_GENERATION_STATE_FILE)
+    with open(_GENERATION_STATE_FILE, "w", encoding="utf-8") as f:
+        json.dump(list(processed_ids), f, ensure_ascii=False, indent=2)
+
+
+def clear_generation_state():
+    """Remove generation_state.json when all customers are done."""
+    if os.path.exists(_GENERATION_STATE_FILE):
+        os.remove(_GENERATION_STATE_FILE)

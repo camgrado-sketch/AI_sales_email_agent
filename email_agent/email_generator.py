@@ -136,19 +136,38 @@ def _html_to_text(html_body):
 
 
 def generate_all(customers=None):
-    """Generate drafts for all (or provided) customers and save to drafts.json."""
+    """Generate drafts for all (or provided) customers and save to drafts.json.
+
+    Supports pause/resume: press Ctrl+C to pause. Re-run to resume from the
+    next unprocessed customer.
+    """
     if customers is None:
         customers = data_store.load_customers()
 
+    processed_ids = data_store.load_generation_state()
+    if processed_ids:
+        print(f"⏳ Resuming generation. {len(processed_ids)} customer(s) already processed.")
+
     drafts = []
-    for customer in customers:
-        customer_id = customer.get("id") or customer.get("customer_id")
-        print(f"Generating draft for {customer.get('name')} at {customer.get('company')}...")
-        try:
-            draft = generate_for_customer(customer)
-            drafts.append(draft)
-        except Exception as e:
-            print(f"❌ Failed to generate draft for {customer_id}: {e}")
+    try:
+        for customer in customers:
+            customer_id = customer.get("id") or customer.get("customer_id")
+            if not customer_id:
+                continue
+            if customer_id in processed_ids:
+                print(f"⏭️  Skipping {customer.get('name')} ({customer_id}) — already generated.")
+                continue
+
+            print(f"Generating draft for {customer.get('name')} at {customer.get('company')}...")
+            try:
+                draft = generate_for_customer(customer)
+                drafts.append(draft)
+                processed_ids.add(customer_id)
+                data_store.save_generation_state(processed_ids)
+            except Exception as e:
+                print(f"❌ Failed to generate draft for {customer_id}: {e}")
+    except KeyboardInterrupt:
+        print("\n⏸️  Generation paused by user.")
 
     # Merge with existing drafts to avoid overwriting approved/edited drafts
     existing = data_store.load_drafts()
@@ -159,7 +178,12 @@ def generate_all(customers=None):
             merged.append(draft)
 
     data_store.save_drafts(merged)
+    total_customers = len([c for c in customers if (c.get("id") or c.get("customer_id"))])
     print(f"✅ Saved {len(drafts)} new draft(s). Total drafts: {len(merged)}")
+    if processed_ids and len(processed_ids) >= total_customers:
+        data_store.clear_generation_state()
+    else:
+        print("💡 Tip: Run option 1 again to resume from where you left off.")
     return drafts
 
 
