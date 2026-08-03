@@ -23,6 +23,13 @@ LLM_BASE_URL = os.getenv("LLM_BASE_URL")  # Optional: for OpenAI-compatible endp
 LLM_MODEL = os.getenv("LLM_MODEL", "gpt-5-mini")
 
 # -----------------------------------------------------------------------------
+# Sender Identity (used when templates ask for sender details)
+# -----------------------------------------------------------------------------
+SENDER_NAME = os.getenv("SENDER_NAME", "[Your Name]")
+SENDER_TITLE = os.getenv("SENDER_TITLE", "Partnership Manager")
+SENDER_MARKET_REGION = os.getenv("SENDER_MARKET_REGION", "Global")
+
+# -----------------------------------------------------------------------------
 # Safety Settings for Demo Phase
 # -----------------------------------------------------------------------------
 DEMO_MODE = True
