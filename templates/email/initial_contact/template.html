@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<style>
+  body {
+    font-family: Arial, sans-serif;
+    color: #333333;
+    line-height: 1.6;
+    margin: 0;
+    padding: 0;
+  }
+  .container {
+    max-width: 600px;
+    margin: 0 auto;
+  }
+  .content {
+    padding: 20px 0;
+  }
+  .image-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 10px;
+    margin: 20px 0;
+  }
+  .image-grid img {
+    width: 100%;
+    height: auto;
+    display: block;
+  }
+  .footer {
+    margin-top: 30px;
+    font-size: 14px;
+  }
+</style>
+</head>
+<body>
+  <div class="container">
+    <div class="content">
+      <p>Dear {{customer_first_name}},</p>
+      
+      <p>I hope you are doing well.</p>
+      <p>My name is {{sender_name}}, and I am responsible for the {{market_region}} market at GRADO Contract.</p>
+      
+      <p>I have been following {{company_name}}'s impressive portfolio across workplace, hospitality, retail, and commercial fit-out projects throughout the region, particularly {{specific_project_or_detail}}.</p>
+      
+      <p>GRADO focuses on public space furniture and collaborative area furniture. We provide stable quality, reliable delivery, and long-term project support. We are specialist of public spaces, hospitality spaces, education spaces, bank spaces, automotive retail showrooms, and healthcare spaces.</p>
+      
+      <p>We have provided furniture for public spaces of leading international brands and Fortune Global 500 companies, helping people work better, connect better, and feel inspired.</p>
+      
+      <div class="image-grid">
+        {{IMAGE:portfolio_grid_1}}
+        {{IMAGE:portfolio_grid_2}}
+        {{IMAGE:portfolio_grid_3}}
+        {{IMAGE:portfolio_grid_4}}
+        {{IMAGE:portfolio_grid_5}}
+        {{IMAGE:portfolio_grid_6}}
+      </div>
+      
+      <p>Given {{company_name}}'s strong presence in delivering high-quality interior projects, I believe there may be opportunities where GRADO could support your team with project-ready furniture solutions that balance design, durability, customization, and commercial requirements.</p>
+      
+      <p>I would welcome the opportunity to introduce GRADO and learn more about {{company_name}}'s current project focus and procurement approach for furniture packages. Would it be useful if I sent you a short overview tailored to the projects your team handles?</p>
+      
+      <p>Thank you for your time and consideration.</p>
+      
+      <div class="footer">
+        <p>Best regards,<br>
+        {{sender_name}}<br>
+        {{sender_title}} | GRADO Contract</p>
+      </div>
+    </div>
+  </div>
+</body>
+</html>
