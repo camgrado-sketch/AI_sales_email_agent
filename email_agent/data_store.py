@@ -154,3 +154,19 @@ def save_settings(settings):
     _ensure_dir(config.SETTINGS_JSON_FILE)
     with open(config.SETTINGS_JSON_FILE, "w", encoding="utf-8") as f:
         json.dump(settings, f, ensure_ascii=False, indent=2)
+
+
+# ------------------------------------------------------------------------------
+# Draft deletion helpers
+# ------------------------------------------------------------------------------
+
+def delete_draft(draft_id):
+    """Remove a single draft by draft_id from drafts.json."""
+    drafts = load_drafts()
+    drafts = [d for d in drafts if d.get("draft_id") != draft_id]
+    save_drafts(drafts)
+
+
+def clear_drafts():
+    """Remove all drafts from drafts.json."""
+    save_drafts([])

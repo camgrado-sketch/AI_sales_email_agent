@@ -23,6 +23,7 @@ def _print_menu():
     print("  5. View logs")
     print("  6. Configuration check")
     print("  7. Toggle skill mode")
+    print("  8. Delete drafts")
     print("  0. Exit")
     print()
 
@@ -163,6 +164,52 @@ def menu_toggle_skill():
     print(f"✅ Skill mode switched to '{new_mode}'. This will be remembered for next runs.")
 
 
+def menu_delete_drafts():
+    print("\n[Delete Drafts]")
+    drafts = data_store.load_drafts()
+    if not drafts:
+        print("No drafts to delete.")
+        return
+
+    print(f"Found {len(drafts)} draft(s):\n")
+    for i, draft in enumerate(drafts, start=1):
+        name = draft.get("customer_id", "?")
+        subject = draft.get("subject", "(no subject)")
+        print(f"  [{i}] {name} - {subject}")
+
+    choice = input('\nEnter number to delete, "all" to clear everything, or 0 to cancel: ').strip()
+    if choice == "0":
+        print("Cancelled.")
+        return
+
+    if choice.lower() == "all":
+        confirm = input("Confirm delete ALL drafts? (Y/n): ").strip().lower()
+        if confirm in ("y", "yes"):
+            data_store.clear_drafts()
+            data_store.clear_generation_state()
+            print("✅ All drafts deleted. Generation state reset.")
+        else:
+            print("Cancelled.")
+        return
+
+    try:
+        idx = int(choice)
+        if idx < 1 or idx > len(drafts):
+            print("Invalid number.")
+            return
+    except ValueError:
+        print("Invalid input.")
+        return
+
+    target = drafts[idx - 1]
+    confirm = input(f"Confirm delete draft #{idx} ({target.get('subject', '')})? (Y/n): ").strip().lower()
+    if confirm in ("y", "yes"):
+        data_store.delete_draft(target.get("draft_id"))
+        print("✅ Draft deleted.")
+    else:
+        print("Cancelled.")
+
+
 def run():
     while True:
         _clear_screen()
@@ -190,6 +237,9 @@ def run():
             _wait_for_enter()
         elif choice == "7":
             menu_toggle_skill()
+            _wait_for_enter()
+        elif choice == "8":
+            menu_delete_drafts()
             _wait_for_enter()
         elif choice == "0":
             print("\nGoodbye! 👋")
