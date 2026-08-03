@@ -3,6 +3,7 @@
 
 # Data files (contains real customer info and logs)
 data/customers.csv
+data/customer copy.csv
 data/email_logs.csv
 data/reply_logs.csv
 data/drafts/

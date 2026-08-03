@@ -22,6 +22,7 @@ def _print_menu():
     print("  4. Check replies")
     print("  5. View logs")
     print("  6. Configuration check")
+    print("  7. Toggle skill mode")
     print("  0. Exit")
     print()
 
@@ -133,6 +134,7 @@ def menu_config():
     print(f"LLM API key:       {'SET' if config.LLM_API_KEY else 'NOT SET'}")
     print(f"LLM model:         {config.LLM_MODEL}")
     print(f"LLM base URL:      {config.LLM_BASE_URL or 'default'}")
+    print(f"Skill mode:        {config.SKILL_MODE}")
     print(f"Demo mode:         {config.DEMO_MODE}")
     print(f"Allowed emails:    {config.ALLOWED_TEST_EMAILS}")
     print(f"Daily send limit:  {config.MAX_DAILY_SENDS}")
@@ -140,6 +142,25 @@ def menu_config():
     print(f"Drafts JSON:       {config.DRAFTS_JSON_FILE}")
     print(f"Templates dir:     {config.TEMPLATES_DIR}")
     print(f"Images dir:        {config.IMAGES_DIR}")
+
+
+def menu_toggle_skill():
+    print("\n[Toggle Skill Mode]")
+    print(f"Current mode: {config.SKILL_MODE}")
+    print("  full    - Use the complete email_writing_skill.md (slower, more detailed)")
+    print("  concise - Use the concise version (faster, ~50 lines)")
+    new_mode = input("Enter mode (full/concise) or press Enter to keep current: ").strip().lower()
+    if not new_mode:
+        print("No change.")
+        return
+    if new_mode not in ("full", "concise"):
+        print("Invalid mode. Must be 'full' or 'concise'.")
+        return
+    settings = data_store.load_settings()
+    settings["skill_mode"] = new_mode
+    data_store.save_settings(settings)
+    config.SKILL_MODE = new_mode
+    print(f"✅ Skill mode switched to '{new_mode}'. This will be remembered for next runs.")
 
 
 def run():
@@ -166,6 +187,9 @@ def run():
             _wait_for_enter()
         elif choice == "6":
             menu_config()
+            _wait_for_enter()
+        elif choice == "7":
+            menu_toggle_skill()
             _wait_for_enter()
         elif choice == "0":
             print("\nGoodbye! 👋")

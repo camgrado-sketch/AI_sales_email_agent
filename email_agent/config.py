@@ -1,3 +1,4 @@
+import json
 import os
 from dotenv import load_dotenv, find_dotenv
 
@@ -67,6 +68,26 @@ SKILLS_DIR = os.path.join(BASE_DIR, "skills")
 
 EMAIL_GENERATION_PROMPT_FILE = os.path.join(PROMPTS_DIR, "email_generation_prompt.md")
 EMAIL_WRITING_SKILL_FILE = os.path.join(SKILLS_DIR, "email_writing_skill.md")
+EMAIL_WRITING_SKILL_CONCISE_FILE = os.path.join(SKILLS_DIR, "email_writing_skill_concise.md")
+
+# ------------------------------------------------------------------------------
+# Settings Persistence
+# ------------------------------------------------------------------------------
+SETTINGS_JSON_FILE = os.path.join(DATA_DIR, "settings.json")
+
+
+def _load_settings():
+    if os.path.exists(SETTINGS_JSON_FILE):
+        try:
+            with open(SETTINGS_JSON_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            return {}
+    return {}
+
+
+_settings = _load_settings()
+SKILL_MODE = os.getenv("SKILL_MODE", _settings.get("skill_mode", "concise"))
 
 # -----------------------------------------------------------------------------
 # Logging Headers

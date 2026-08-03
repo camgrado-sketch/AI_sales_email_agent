@@ -39,7 +39,13 @@ def _build_variable_schema(template_config):
 
 
 def _build_system_prompt(template_config):
-    writing_skill = _read_file(config.EMAIL_WRITING_SKILL_FILE)
+    """Build the system prompt, selecting full or concise skill based on config."""
+    skill_file = (
+        config.EMAIL_WRITING_SKILL_FILE
+        if config.SKILL_MODE == "full"
+        else config.EMAIL_WRITING_SKILL_CONCISE_FILE
+    )
+    writing_skill = _read_file(skill_file)
     generation_prompt = _read_file(config.EMAIL_GENERATION_PROMPT_FILE)
     rules = "\n".join(f"- {r}" for r in template_config.get("rules", []))
     return f"""You are a professional business email writer representing GRADO CONTRACT.

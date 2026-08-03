@@ -135,3 +135,22 @@ def clear_generation_state():
     """Remove generation_state.json when all customers are done."""
     if os.path.exists(_GENERATION_STATE_FILE):
         os.remove(_GENERATION_STATE_FILE)
+
+
+# ------------------------------------------------------------------------------
+# Settings persistence
+# ------------------------------------------------------------------------------
+
+def load_settings():
+    """Load user settings from settings.json."""
+    if not os.path.exists(config.SETTINGS_JSON_FILE):
+        return {}
+    with open(config.SETTINGS_JSON_FILE, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+def save_settings(settings):
+    """Persist user settings to settings.json."""
+    _ensure_dir(config.SETTINGS_JSON_FILE)
+    with open(config.SETTINGS_JSON_FILE, "w", encoding="utf-8") as f:
+        json.dump(settings, f, ensure_ascii=False, indent=2)
