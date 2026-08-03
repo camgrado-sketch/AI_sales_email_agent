@@ -6,6 +6,7 @@ data/customers.csv
 data/email_logs.csv
 data/reply_logs.csv
 data/drafts/
+data/drafts.json
 
 # Python cache
 __pycache__/
