@@ -23,7 +23,7 @@ def _attach_images(msg, images):
             img_data = f.read()
         mime_image = MIMEImage(img_data)
         mime_image.add_header("Content-ID", f"<{cid}>")
-        mime_image.add_header("Content-Disposition", "inline", filename=config.os.path.basename(path))
+        mime_image.add_header("Content-Disposition", "inline", filename=os.path.basename(path))
         msg.attach(mime_image)
 
 
@@ -118,9 +118,9 @@ def send_email(draft):
 def process_queue(drafts=None):
     """Read approved drafts and send them with rate limiting."""
     if drafts is None:
-        drafts = data_store.load_drafts(status="approved")
+        drafts = data_store.load_drafts()
 
-    to_send = [d for d in drafts if d.get("review_status", "").lower() == "approved"]
+    to_send = [d for d in drafts if d.get("review_status", "").lower() in ("approved", "pass")]
 
     if not to_send:
         print("No approved drafts found to send.")
