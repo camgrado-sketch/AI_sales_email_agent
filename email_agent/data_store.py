@@ -44,10 +44,13 @@ def load_reply_logs():
 
 def load_drafts(status=None):
     """Load drafts from drafts.json. Optionally filter by review_status."""
-    if not os.path.exists(config.DRAFTS_JSON_FILE):
+    if not os.path.exists(config.DRAFTS_JSON_FILE) or os.path.getsize(config.DRAFTS_JSON_FILE) == 0:
         return []
-    with open(config.DRAFTS_JSON_FILE, "r", encoding="utf-8") as f:
-        drafts = json.load(f)
+    try:
+        with open(config.DRAFTS_JSON_FILE, "r", encoding="utf-8") as f:
+            drafts = json.load(f)
+    except json.JSONDecodeError:
+        return []
     if status is not None:
         drafts = [d for d in drafts if d.get("review_status") == status]
     return drafts
@@ -118,10 +121,13 @@ _GENERATION_STATE_FILE = os.path.join(config.DATA_DIR, "generation_state.json")
 
 def load_generation_state():
     """Load the set of already-processed customer_ids from generation_state.json."""
-    if not os.path.exists(_GENERATION_STATE_FILE):
+    if not os.path.exists(_GENERATION_STATE_FILE) or os.path.getsize(_GENERATION_STATE_FILE) == 0:
         return set()
-    with open(_GENERATION_STATE_FILE, "r", encoding="utf-8") as f:
-        return set(json.load(f))
+    try:
+        with open(_GENERATION_STATE_FILE, "r", encoding="utf-8") as f:
+            return set(json.load(f))
+    except json.JSONDecodeError:
+        return set()
 
 
 def save_generation_state(processed_ids):
@@ -143,10 +149,13 @@ def clear_generation_state():
 
 def load_settings():
     """Load user settings from settings.json."""
-    if not os.path.exists(config.SETTINGS_JSON_FILE):
+    if not os.path.exists(config.SETTINGS_JSON_FILE) or os.path.getsize(config.SETTINGS_JSON_FILE) == 0:
         return {}
-    with open(config.SETTINGS_JSON_FILE, "r", encoding="utf-8") as f:
-        return json.load(f)
+    try:
+        with open(config.SETTINGS_JSON_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except json.JSONDecodeError:
+        return {}
 
 
 def save_settings(settings):
