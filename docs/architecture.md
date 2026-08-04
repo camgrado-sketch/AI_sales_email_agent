@@ -1,15 +1,16 @@
 # 架构设计文档 (architecture.md)
 
-> 本架构根据 `docs/PRD.md` 第 2 章用户流及 `tasks/TASK.md` 四个阶段任务拆解设计。目标是在现有 `email_agent/` 与 `templates/email/` 基础上，升级为**完全内部闭环运行的 AI 销售邮件自动化系统**。
+> 本文档根据 `docs/PRD.md`、`tasks/TASK.md` 以及本次功能升级计划更新，目标是在现有闭环基础上增加：**多模型支持、模板导入与确认、浏览器预览、可中断发送、状态栏、生成元数据、严格的内容约束**。
 
 ## 1. 设计目标
 
-1. **交互式终端闭环**：用户通过 `python main.py` 进入菜单，无需手动修改 CSV 中的 `review_status`。
-2. **数据直连**：从 `data/customers.csv`、`data/email_logs.csv`、`data/reply_logs.csv` 自动读取客户与互动历史。
-3. **智能分析与模板匹配**：由 LLM 判断客户销售阶段，并匹配 `templates/email/` 下的 YAML/HTML 模板。
-4. **富媒体邮件**：支持 `{{IMAGE:xxx}}` 占位符，自动嵌入 `assets/images/` 中的图片为 CID 内联图片。
-5. **安全发送**：频率控制、随机延迟、相似度检测、SPF DNS 校验、白名单拦截。
-6. **可测试与可扩展**：每个模块独立开发、独立测试，便于后续迁移到 SQLite。
+1. **交互式终端闭环**：用户通过 `python main.py` 进入菜单，完成生成 → 预览审核 → 发送 → 查回复全流程。
+2. **多模型灵活切换**：`.env` 支持配置多个 LLM，终端菜单切换，选择持久化到 `data/settings.json`。
+3. **模板可管理**：通过 `templates/import/` 拖入 `md/docx/pdf` 自动导入；旧模板按 `YYYY/MM/DD` 归档；新模板需浏览器预览 + 终端确认后才能启用。
+4. **生成可控可追溯**：每封草稿记录生成时间、token 消耗、使用的模型；严格基于确认模板填充变量，禁止编造、语言混用、随机寄件人名。
+5. **发送可中断**：发送队列支持 Ctrl+C 暂停，通过 `data/sending_state.json` 续跑。
+6. **状态可视**：终端顶部红/黄/绿状态栏即时反馈当前能否生成/发送。
+7. **客户与语言规则**：`customers.csv` 中 `name` 以 `#` 开头的客户跳过生成/发送；`location` 字段支持 `(中文)` / `(英文)` 后缀覆盖邮件语言。
 
 ## 2. 目录结构
 
@@ -17,40 +18,55 @@
 AI_sales_email_agent/
 ├── docs/
 │   ├── PRD.md              # 产品需求，只读
-│   └── architecture.md     # 本文件
+│   ├── architecture.md     # 本文件
+│   └── CONFIG_GUIDE.md     # 配置与操作指南
 ├── tasks/
 │   └── TASK.md             # 任务拆解，只读
 ├── email_agent/            # 核心代码包
 │   ├── __init__.py
-│   ├── config.py           # 配置与路径（扩展）
-│   ├── cli_controller.py   # 交互式 CLI 菜单（新增）
-│   ├── llm_client.py       # LLM API 客户端（新增）
-│   ├── data_store.py       # CSV/JSON 读写抽象（新增）
-│   ├── interaction_analyzer.py  # 客户阶段分析（新增）
-│   ├── template_engine.py  # YAML/HTML 模板渲染（新增）
-│   ├── email_generator.py  # 邮件草稿生成编排（新增）
-│   ├── deliverability.py   # 发送策略与风控（新增）
-│   ├── sender.py           # SMTP 发送（重构：HTML + 内联图片）
-│   ├── receiver.py         # IMAP 回复采集（轻微重构）
-│   └── logger.py           # 日志写入（扩展）
-├── templates/email/        # 模板目录（已存在）
-│   ├── initial_contact/
-│   │   ├── config.yaml
-│   │   └── template.html
-│   ├── follow_up/
-│   └── final_note/
+│   ├── config.py           # 配置与路径（多模型、sender_profile、模板路径）
+│   ├── cli_controller.py   # 交互式 CLI 菜单（状态栏、预览、模型切换、模板导入）
+│   ├── llm_client.py       # LLM API 客户端（返回 usage、多模型、Moonshot 兼容）
+│   ├── data_store.py       # CSV/JSON 读写抽象
+│   ├── interaction_analyzer.py  # 客户阶段 + 语言判定
+│   ├── template_engine.py  # YAML/HTML 模板渲染（多语言版本）
+│   ├── template_importer.py# 模板导入、归档、双语生成、确认工作流（新增）
+│   ├── email_generator.py  # 邮件草稿生成编排（元数据、增量落盘）
+│   ├── preview.py          # 浏览器预览 HTML 生成（草稿/回复）（新增）
+│   ├── status.py           # 顶部状态栏计算（新增）
+│   ├── deliverability.py   # 发送策略与风控
+│   ├── sender.py           # SMTP 发送（可中断队列）
+│   ├── receiver.py         # IMAP 回复采集（结构化返回）
+│   └── logger.py           # 日志写入
+├── templates/
+│   ├── email/              # 激活的邮件模板
+│   │   ├── initial_contact/
+│   │   │   ├── config.yaml
+│   │   │   ├── template.html
+│   │   │   └── template_en.html   # 英文版本（可选）
+│   │   ├── follow_up/
+│   │   └── final_note/
+│   ├── import/             # 用户拖入的模板源文件（md/docx/pdf）
+│   ├── archive/            # 历史模板归档 YYYY/MM/DD/<name>/
+│   └── sender_profile.md   # 寄件人身份变量（新增）
 ├── assets/
-│   └── images/             # 模板内联图片（新增）
+│   └── images/             # 模板内联图片
 ├── data/
 │   ├── customers.csv
-│   ├── drafts.json         # 结构化草稿（新增，替代 drafts.csv）
+│   ├── drafts.json
 │   ├── email_logs.csv
-│   └── reply_logs.csv
+│   ├── reply_logs.csv
+│   ├── settings.json
+│   ├── generation_state.json        # 生成暂停/续跑状态
+│   ├── sending_state.json           # 发送暂停/续跑状态（新增）
+│   └── template_import_state.json   # 导入目录 checksum（新增）
 ├── prompts/
 │   └── email_generation_prompt.md
 ├── skills/
-│   └── email_writing_skill.md
-├── main.py                 # 入口：启动 CLI
+│   ├── email_writing_skill.md
+│   └── email_writing_skill_concise.md
+├── main.py                 # 入口
+├── README.md
 └── requirements.txt
 ```
 
@@ -58,104 +74,120 @@ AI_sales_email_agent/
 
 | 模块 | 文件 | 职责 |
 |------|------|------|
-| 配置中心 | `email_agent/config.py` | 统一管理路径、SMTP/IMAP、白名单、频率限制等常量。 |
-| 数据存储 | `email_agent/data_store.py` | 读写 `customers.csv`、`email_logs.csv`、`reply_logs.csv`、`drafts.json`，屏蔽底层格式。 |
-| CLI 控制器 | `email_agent/cli_controller.py` | 提供交互式菜单：生成草稿、逐条审核、发送队列、查看日志、配置检查。 |
-| LLM 客户端 | `email_agent/llm_client.py` | 统一封装 OpenAI 兼容 API 调用，支持 `.env` 配置与 JSON schema 输出。 |
-| 互动分析器 | `email_agent/interaction_analyzer.py` | 根据客户历史邮件与回复，判断销售阶段（new_lead / contacted_no_reply / follow_up_no_reply / replied 等）。 |
-| 模板引擎 | `email_agent/template_engine.py` | 解析 `templates/email/<name>/config.yaml` 与 `template.html`；替换 `{{var}}` 与 `{{IMAGE:xxx}}` 为 CID 内联图片。 |
-| 邮件生成器 | `email_agent/email_generator.py` | 编排：读取客户 → 分析阶段 → 选择模板 → 调用 LLM 填充变量 → 模板引擎渲染 → 输出 `drafts.json`。 |
-| 送达率管理 | `email_agent/deliverability.py` | 频率上限、随机延迟、相似度检测、SPF DNS 校验、白名单过滤。 |
-| 发送器 | `email_agent/sender.py` | 通过 SMTP 发送 HTML + 内联图片，记录 `email_logs.csv`。 |
-| 接收器 | `email_agent/receiver.py` | 通过 IMAP 采集回复，记录 `reply_logs.csv`。 |
-| 日志器 | `email_agent/logger.py` | 初始化与追加写入日志文件。 |
+| 配置中心 | `email_agent/config.py` | 读取 `.env`、解析多模型块、加载 `sender_profile.md`、定义全部路径与常量。 |
+| 数据存储 | `email_agent/data_store.py` | 读写 CSV/JSON；新增 sending/import state、增量追加 draft。 |
+| CLI 控制器 | `email_agent/cli_controller.py` | 交互菜单、状态栏、调用各子模块。 |
+| LLM 客户端 | `email_agent/llm_client.py` | 统一调用当前 active model，返回 content + usage；兼容 Moonshot。 |
+| 互动分析器 | `email_agent/interaction_analyzer.py` | 判断销售阶段 + 邮件语言（大陆中文、海外英文、后缀覆盖）。 |
+| 模板引擎 | `email_agent/template_engine.py` | 解析 `config.yaml` + `template.html`；支持 `template_<lang>.html`。 |
+| 模板导入器 | `email_agent/template_importer.py` | 扫描 `templates/import/` → Markdown 中间层 → 合并/双语 → 归档 → 预览 → 确认激活。 |
+| 邮件生成器 | `email_agent/email_generator.py` | 编排生成：分析 → 选择模板 → LLM 填变量 → 渲染 → 落盘，记录元数据。 |
+| 预览器 | `email_agent/preview.py` | 生成自包含 HTML 临时文件并用 `webbrowser` 打开。 |
+| 状态计算器 | `email_agent/status.py` | 综合配置、模板确认、草稿/发送状态，输出红/黄/绿。 |
+| 送达率管理 | `email_agent/deliverability.py` | 频率、延迟、相似度、SPF、白名单。 |
+| 发送器 | `email_agent/sender.py` | SMTP 发送；支持 pause/resume；跳过 `#` 客户。 |
+| 接收器 | `email_agent/receiver.py` | IMAP 采集回复，返回结构化列表。 |
+| 日志器 | `email_agent/logger.py` | 初始化与追加日志。 |
 
 ## 4. 数据流
 
 ```
 ┌─────────────┐     ┌──────────────┐     ┌─────────────────────┐
-│  main.py    │────▶│ cli_controller│────▶│     data_store      │
-│ (entry)     │     │ (interactive) │     │ (customers/logs)    │
+│  main.py    │────▶│ cli_controller│────▶│  status.py          │
+│ (entry)     │     │ (interactive) │     │  (red/yellow/green) │
 └─────────────┘     └──────────────┘     └─────────────────────┘
-                                                  │
-                                                  ▼
+                            │
+        ┌───────────────────┼───────────────────┐
+        ▼                   ▼                   ▼
+  ┌─────────────┐    ┌──────────────┐    ┌──────────────┐
+  │ Generate    │    │ Review       │    │ Send         │
+  │ (browser    │    │ (browser     │    │ (Ctrl+C      │
+  │  preview)   │    │  preview)    │    │  pause)      │
+  └─────────────┘    └──────────────┘    └──────────────┘
+        │
+        ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│                        生成草稿流程                              │
-│  data_store.load_customers()                                      │
+│                        模板导入工作流                            │
+│  templates/import/<file>                                         │
 │        │                                                          │
 │        ▼                                                          │
-│  interaction_analyzer.analyze(customer, history)                  │
-│        │ 输出：stage, template_type, strategy                     │
+│  template_importer.extract_to_markdown()                         │
+│        │ 输出：结构化 Markdown（段落、图片/链接占位）             │
 │        ▼                                                          │
-│  llm_client.complete(...) 填充模板变量                            │
-│        │                                                          │
+│  template_importer.merge_markdown_into_template()                │
+│        │ 保留 {{var}}、{{IMAGE:name}}、<img>、<a>                 │
 │        ▼                                                          │
-│  template_engine.render(template_name, variables)                 │
-│        │ 输出：html_body, images[(cid, path)]                     │
+│  template_importer.generate_missing_language()（如需要）         │
 │        ▼                                                          │
-│  data_store.save_drafts([draft, ...]) 写入 drafts.json            │
+│  template_importer.archive_current_template()                    │
+│        ▼                                                          │
+│  preview.build_preview_html() → webbrowser                       │
+│        ▼                                                          │
+│  终端确认 → settings.template_confirmed = true                   │
 └─────────────────────────────────────────────────────────────────┘
                           │
                           ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│                        审核流程                                  │
-│  cli_controller.review_drafts()                                   │
-│  逐条展示 subject + html_body（可选纯文本摘要）                   │
-│  用户按键：Y 通过 / N 拒绝 / E 编辑                              │
-│  data_store.update_draft_status(draft_id, status)                │
+│                        生成草稿流程                              │
+│  data_store.load_customers() （过滤 # 前缀客户）                 │
+│        │                                                          │
+│        ▼                                                          │
+│  interaction_analyzer.analyze(customer, history)                 │
+│        │ 输出：stage, template_type, strategy, language           │
+│        ▼                                                          │
+│  llm_client.complete_json(...) 填充模板变量 + usage              │
+│        │                                                          │
+│        ▼                                                          │
+│  template_engine.render(template_name, variables, language)      │
+│        │ 输出：html_body, images                                  │
+│        ▼                                                          │
+│  data_store.append_draft(draft) 写入 drafts.json                 │
 └─────────────────────────────────────────────────────────────────┘
                           │
                           ▼
 ┌─────────────────────────────────────────────────────────────────┐
 │                        发送流程                                  │
-│  data_store.load_drafts(status='approved')                        │
+│  data_store.load_drafts(status='approved')                       │
 │        │                                                          │
 │        ▼                                                          │
-│  deliverability.can_send(draft, send_history)                     │
-│  （频率、相似度、SPF、白名单）                                   │
-│        │                                                          │
+│  sender.process_queue()                                          │
+│        │ 加载 sending_state.json，跳过已发送/#客户               │
 │        ▼                                                          │
-│  sender.send(draft)  HTML + 内联图片                              │
-│        │                                                          │
+│  deliverability.can_send(draft, send_history)                    │
 │        ▼                                                          │
-│  logger.log_email_send(...)                                       │
-│        │                                                          │
+│  sender.send_email(draft)  HTML + 内联图片                       │
 │        ▼                                                          │
-│  deliverability.wait_before_next() 随机延迟                       │
+│  logger.log_email_send(...) → email_logs.csv                     │
+│        ▼                                                          │
+│  deliverability.wait_before_next()（可中断短延迟）               │
 └─────────────────────────────────────────────────────────────────┘
                           │
                           ▼
 ┌─────────────────────────────────────────────────────────────────┐
 │                        回复采集流程                              │
-│  receiver.check_replies() 读取 IMAP                               │
-│  匹配已发送邮件（优先 Message-ID，回退 recipient）               │
-│  logger.log_reply(...) 写入 reply_logs.csv                       │
+│  receiver.check_replies() 读取 IMAP                              │
+│        │ 输出：结构化 reply list                                │
+│        ▼                                                          │
+│  preview.open_replies_preview() → webbrowser                     │
+│        ▼                                                          │
+│  终端选择保存/刷新/退出                                          │
+│        ▼                                                          │
+│  logger.log_reply(...) → reply_logs.csv                          │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-## 5. 关键接口定义
+## 5. 关键数据结构
 
-### 5.1 数据存储 `email_agent/data_store.py`
-
-```python
-def load_customers() -> list[dict]: ...
-def load_email_logs() -> list[dict]: ...
-def load_reply_logs() -> list[dict]: ...
-def load_drafts(status: str | None = None) -> list[dict]: ...
-def save_drafts(drafts: list[dict]) -> None: ...
-def update_draft_status(draft_id: str, status: str) -> None: ...
-def get_customer_history(customer_id: str) -> dict: ...
-```
-
-`drafts.json` 单条记录示例：
+### 5.1 `data/drafts.json` 单条记录
 
 ```json
 {
-  "draft_id": "20260803-001",
+  "draft_id": "20260804-001",
   "customer_id": "001",
   "email": "camgrado@gmail.com",
   "template": "initial_contact",
   "stage": "new_lead",
+  "language": "cn",
   "subject": "...",
   "html_body": "<html>...</html>",
   "text_body": "...",
@@ -164,11 +196,67 @@ def get_customer_history(customer_id: str) -> dict: ...
   ],
   "personalization_note": "...",
   "review_status": "pending",
-  "created_at": "2026-08-03 10:00:00"
+  "created_at": "2026-08-04 10:00:00",
+  "model_used": "kimi-k2.6",
+  "generation_meta": {
+    "generation_time": "2026-08-04T10:00:00",
+    "prompt_tokens": 420,
+    "completion_tokens": 180,
+    "total_tokens": 600
+  }
 }
 ```
 
-### 5.2 LLM 客户端 `email_agent/llm_client.py`
+### 5.2 `data/settings.json`
+
+```json
+{
+  "skill_mode": "concise",
+  "active_model_index": 0,
+  "template_confirmed": false,
+  "template_confirmed_at": null
+}
+```
+
+### 5.3 `data/sending_state.json`
+
+```json
+{
+  "started_at": "2026-08-04T10:00:00",
+  "sent_draft_ids": ["20260804-001"],
+  "remaining_draft_ids": ["20260804-002"]
+}
+```
+
+### 5.4 `templates/sender_profile.md`
+
+```markdown
+---
+sender_name: "张三"
+sender_title: "商务拓展经理"
+sender_market_region: "大中华区"
+sender_phone: "+86 138 0000 0000"
+sender_email: "zhangsan@gradodesign.hk"
+---
+
+如有其他落款信息可写在这里，供 prompt 引用。
+```
+
+## 6. 关键接口定义
+
+### 6.1 `email_agent/config.py`
+
+```python
+AVAILABLE_MODELS: list[dict]          # 从 .env 解析
+ACTIVE_MODEL_INDEX: int               # 来自 settings.json / .env
+
+def load_available_models() -> list[dict]: ...
+def get_active_model() -> dict: ...
+def load_sender_profile() -> dict: ...
+def is_template_confirmed() -> bool: ...
+```
+
+### 6.2 `email_agent/llm_client.py`
 
 ```python
 def complete(
@@ -176,172 +264,137 @@ def complete(
     user_prompt: str,
     response_format: dict | None = None,
     temperature: float = 0.7,
-) -> str: ...
+) -> dict:  # {"content": str, "usage": {"prompt_tokens": int, ...}}
+
+def complete_json(
+    system_prompt: str,
+    user_prompt: str,
+    schema: dict,
+    temperature: float = 0.7,
+) -> dict:  # {"content": raw_json_str, "usage": dict}
 ```
 
-支持通过 `.env` 配置：
-- `LLM_API_KEY`
-- `LLM_BASE_URL`（可选，默认 OpenAI）
-- `LLM_MODEL`（默认 `gpt-5-mini`）
-
-### 5.3 互动分析器 `email_agent/interaction_analyzer.py`
+### 6.3 `email_agent/interaction_analyzer.py`
 
 ```python
-def analyze(customer: dict, history: dict) -> dict:
+def analyze(customer: dict, history: dict | None = None) -> dict:
     """
     返回：
     {
-      "stage": "new_lead" | "contacted_no_reply" | "follow_up_no_reply" | "replied" | ...,
-      "template_type": "initial_contact" | "follow_up" | "final_note",
-      "strategy": "str",  # 给生成器的策略提示
-      "reason": "str"     # 简短判定依据
+      "stage": str,
+      "template_type": str,
+      "strategy": str,
+      "reason": str,
+      "language": "cn" | "en"
     }
     """
 ```
 
-实现策略：
-1. 先按规则快速判定：有成功回复 → `replied`；有多次发送无回复 → `follow_up_no_reply`；有一次发送无回复 → `contacted_no_reply`；无发送记录 → `new_lead`。
-2. 边界情况或新客户交由 LLM 根据客户画像输出 `stage` 与 `strategy`。
-
-### 5.4 模板引擎 `email_agent/template_engine.py`
+### 6.4 `email_agent/template_engine.py`
 
 ```python
-def list_templates() -> list[str]: ...
-def get_template_config(template_name: str) -> dict: ...
-def render(template_name: str, variables: dict) -> tuple[str, list[dict]]:
-    """
-    返回：(html_body, images)
-    html_body 中 {{IMAGE:xxx}} 已替换为 cid:xxx 引用。
-    images 包含每个内联图片的 cid 与本地路径，供发送器构造 MIME。
-    """
+def get_template_path(template_name: str, language: str | None = None) -> str: ...
+def render(template_name: str, variables: dict, language: str | None = None) -> tuple[str, list[dict]]: ...
+def list_template_languages(template_name: str) -> list[str]: ...
 ```
 
-渲染规则：
-- 普通变量 `{{var}}` 直接替换。
-- 图片占位符 `{{IMAGE:portfolio_grid_1}}` 替换为 `<img src="cid:portfolio_grid_1" alt="...">`。
-- 图片默认搜索路径：`assets/images/<name>.jpg/.png/.jpeg`。
-- 若模板 `config.yaml` 声明了 `images` 列表但文件缺失，记录警告但不阻断（发送时跳过该图片）。
-
-### 5.5 邮件生成器 `email_agent/email_generator.py`
+### 6.5 `email_agent/template_importer.py`
 
 ```python
-def generate_all(customers: list[dict] | None = None) -> list[dict]: ...
-def generate_for_customer(customer: dict) -> dict: ...
+def scan_import_folder() -> list[ImportCandidate]: ...
+def detect_changes() -> list[ImportCandidate]: ...
+def extract_to_markdown(path: str) -> dict: ...
+def merge_markdown_into_template(template_name: str, markdown: str, language: str) -> str: ...
+def generate_missing_language(template_name: str, source_lang: str, target_lang: str) -> str: ...
+def has_unfinished_work(template_name: str) -> tuple[bool, str]: ...
+def activate_template(template_name: str, force: bool = False) -> None: ...
 ```
 
-生成步骤：
-1. 调用 `interaction_analyzer.analyze` 得到 `stage` 与 `template_type`。
-2. 读取对应模板 `config.yaml`，获取变量列表与规则。
-3. 构造 system prompt（融合 `email_writing_skill.md` + `email_generation_prompt.md` + 模板规则）与 user prompt（客户信息 + 历史）。
-4. 调用 `llm_client.complete` 让 LLM 返回 JSON（包含所有模板变量值）。
-5. 调用 `template_engine.render` 生成 HTML。
-6. 组装 `draft` 字典并追加到 `drafts.json`。
-
-### 5.6 送达率管理 `email_agent/deliverability.py`
+### 6.6 `email_agent/preview.py`
 
 ```python
-def can_send(draft: dict, send_history: list[dict]) -> tuple[bool, str]: ...
-def wait_before_next() -> None: ...
-def check_spf(domain: str) -> bool: ...
-def is_similar_to_recent(draft: dict, recent_drafts: list[dict], threshold: float = 0.9) -> bool: ...
+def open_draft_preview(draft: dict) -> str: ...
+def open_replies_preview(replies: list[dict]) -> str: ...
 ```
 
-策略（来自 `config/email_policy.md`）：
-- 每日上限：50 封。
-- 随机间隔：30 秒 ~ 10 分钟（demo 可配置为 30 秒 ~ 2 分钟）。
-- 相似度：对过去 24 小时内已发送邮件文本计算相似度，超过阈值则阻止。
-- SPF：发送前检查发件域名 SPF 记录，失败仅警告不阻断（避免网络问题导致完全不可用）。
-- 白名单：`config.DEMO_MODE` 开启时仅允许 `ALLOWED_TEST_EMAILS`。
-
-### 5.7 发送器 `email_agent/sender.py`
+### 6.7 `email_agent/status.py`
 
 ```python
-def send_email(draft: dict) -> bool: ...
+def compute_status() -> dict:
+    """返回 {"color": "red|yellow|green", "label": str, "messages": list[str]}"""
+```
+
+### 6.8 `email_agent/sender.py`
+
+```python
 def process_queue(drafts: list[dict] | None = None) -> None: ...
 ```
 
-重构要点：
-- 输入从 `drafts.csv` 改为 `drafts.json`。
-- 使用 `MIMEMultipart('related')` 包装 HTML 部分与内联图片（`MIMEImage` + `Content-ID`）。
-- 保留 Message-ID 生成，用于回复追踪。
-- 在 `process_queue` 中调用 `deliverability.can_send` 与 `wait_before_next`。
-
-### 5.8 CLI 控制器 `email_agent/cli_controller.py`
+### 6.9 `email_agent/receiver.py`
 
 ```python
-def run() -> None: ...
-def menu_generate() -> None: ...
-def menu_review() -> None: ...
-def menu_send() -> None: ...
-def menu_logs() -> None: ...
-def menu_config() -> None: ...
+def check_replies(dry_run: bool = False) -> list[dict]: ...
 ```
 
-菜单选项：
-1. 生成草稿
-2. 逐条审核
-3. 发送已审核邮件
-4. 检查回复
-5. 查看发送/回复日志
-6. 配置检查
-7. 退出
-
-## 6. 模块开发顺序（与 TASK.md 对齐）
+## 7. 实施顺序
 
 按**一个模块一次提交**原则执行：
 
-### 阶段一：基础架构重构与 CLI 交互界面
-1. `email_agent/config.py` 扩展：新增 LLM、模板、草稿 JSON、assets 路径、频率限制常量。
-2. `email_agent/data_store.py`：统一 CSV/JSON 数据读写。
-3. `email_agent/llm_client.py`：LLM API 客户端。
-4. `email_agent/cli_controller.py`：交互式 CLI。
-5. `main.py` 重构：默认进入 CLI；保留 `--send` / `--check-replies` 兼容旧入口。
+### 阶段一：地基与元数据
+1. `config.py`：多模型解析、`sender_profile.md`、模板路径。
+2. `data_store.py`：sending/import state、`append_draft`。
+3. `llm_client.py`：返回 usage、使用 active model。
+4. `email_generator.py`：`generation_meta`、`model_used`、增量落盘。
 
-### 阶段二：模板引擎与富媒体支持
-6. `email_agent/template_engine.py`：YAML/HTML 解析与图片占位符渲染。
-7. `assets/images/` 目录初始化（README / .gitkeep）。
-8. 调整 `data/drafts.json` 格式并迁移现有 `drafts.csv` 数据。
+### 阶段二：模板导入与确认
+5. `template_importer.py`：扫描、Markdown 中间层、归档、合并、双语。
+6. `settings.json`：`template_confirmed`；生成/发送前检查。
+7. `template_engine.py`：多语言版本支持。
 
-### 阶段三：智能分析与闭环生成
-9. `email_agent/interaction_analyzer.py`：客户阶段分析。
-10. `email_agent/email_generator.py`：端到端草稿生成。
-11. CLI 审核功能集成。
+### 阶段三：生成质量约束
+8. 修订 `skills/*.md`、`prompts/email_generation_prompt.md`。
+9. `email_generator.py`：强制寄件人身份、跳过 `#` 客户、语言注入。
+10. `interaction_analyzer.py`：语言判定逻辑。
 
-### 阶段四：送达率优化与发送队列
-12. `email_agent/deliverability.py`：频率/延迟/相似度/SPF。
-13. `email_agent/sender.py` 重构：HTML + 内联图片 + 队列。
-14. `email_agent/receiver.py` 重构：优先 Message-ID 匹配。
-15. `email_agent/logger.py` 扩展：记录更完整字段（如 html_length、image_count）。
+### 阶段四：浏览器预览
+11. `preview.py`：草稿/回复 HTML 生成与图片内联。
+12. `cli_controller.py`：审核菜单调用浏览器预览。
+13. `cli_controller.py`：回复菜单调用浏览器列表。
 
-## 7. 验证策略
+### 阶段五：可中断发送
+14. `sender.py`：sending state、pause/resume、Ctrl+C 响应、底部提示。
 
-每个模块完成后进行**黑盒测试**：
+### 阶段六：状态栏与 CLI 完善
+15. `status.py`：红/黄/绿计算逻辑。
+16. `cli_controller.py`：顶部状态栏、菜单重排、模型切换、模板导入/确认菜单。
 
-| 模块 | 验证命令 / 方法 |
-|------|----------------|
-| `data_store` | `python -c "from email_agent.data_store import *; print(load_customers()[:1])"` |
-| `llm_client` | CLI → 配置检查 → 测试 LLM 调用返回非空文本。 |
-| `cli_controller` | `python main.py` 能看到菜单，输入选项可跳转。 |
-| `template_engine` | `python -c "from email_agent.template_engine import render; print(render('initial_contact', {...}))"` |
-| `interaction_analyzer` | 为同一客户构造不同历史，验证阶段输出符合预期。 |
-| `email_generator` | CLI → 生成草稿 → 检查 `drafts.json` 字段完整。 |
-| `deliverability` | 连续调用 `can_send` 与 `wait_before_next`，验证延迟在区间内。 |
-| `sender` | 发送一封测试邮件到白名单邮箱，确认收到 HTML + 图片。 |
-| `receiver` | 对测试收件箱运行 `python main.py --check-replies`，确认回复被记录。 |
-| 端到端 | 完整跑通：生成 → 审核 → 发送 → 查回复。 |
+### 阶段七：文档
+17. `README.md`：面向新手的部署与操作指南。
+18. `docs/CONFIG_GUIDE.md`：详细配置与可调参数说明。
 
 ## 8. 关键决策与约束
 
-1. **草稿存储格式**：采用 `data/drafts.json` 替代原 `drafts.csv`，因为需要保存 HTML 源码与图片映射；`sender.py` 相应改为读取 JSON。
-2. **模板变量语言**：当前三套模板均为英文。中文客户仍由 LLM 在变量层面生成中文内容，模板 HTML 结构与落款保持英文框架；后续可新增中文模板。
-3. **相似度算法**：使用 `difflib.SequenceMatcher` 简单文本相似度，后续可升级为国密/hash/simhash。
-4. **SPF 检查**：使用 `dns.resolver` 查询 `TXT` 记录，失败仅作警告，不阻断发送，防止 DNS 故障导致业务完全停滞。
-5. **Demo 白名单**：保留 `config.DEMO_MODE` 与 `ALLOWED_TEST_EMAILS`，默认开启。
-6. **`.env` 敏感信息**：LLM API 密钥与邮箱密码均从 `.env` 读取，永不入代码库。
+1. **草稿存储格式**：继续采用 `data/drafts.json`，新增 `generation_meta`、`model_used`、`language` 字段。
+2. **多模型配置**：使用 `.env` 编号块 `MODEL_1_NAME/ BASE_URL/ API_KEY/ MODEL/ TEMPERATURE`；无编号块时回退旧变量，保证向后兼容。
+3. **模板导入**：必须走“Markdown 中间层 → DOM 合并 → 预览 → 确认”四步，未确认模板禁止生成/发送。
+4. **语言规则**：大陆默认中文，香港/台湾/海外默认英文；`location` 后缀可强制覆盖。
+5. **寄件人身份**：`templates/sender_profile.md` 优先于 `.env`，LLM 必须严格使用，不得杜撰。
+6. **相似度与风控**：保留 `difflib.SequenceMatcher`、SPF 警告、Demo 白名单、随机延迟。
+7. **可中断性**：生成与发送均通过 JSON state 文件实现 pause/resume；延迟拆分为短 sleep。
+8. **浏览器预览**：标准库 `webbrowser` + 临时 HTML；无桌面环境时打印路径，不阻断流程。
+9. **客户跳过**：`name` 以 `#` 开头仅跳过生成/发送，不影响回复记录（回复按 `email_logs.csv` 匹配）。
+10. **文档边界**：不修改 `docs/PRD.md` 和 `docs/UserFlow.md`；`architecture.md`、README、CONFIG_GUIDE 属于本实现范畴。
 
-## 9. 与现有代码的继承关系
+## 9. 验证策略
 
-- 保留 `email_agent/config.py`、`email_agent/logger.py` 的接口与路径约定。
-- `sender.py` 与 `receiver.py` 的核心 SMTP/IMAP 逻辑保留，仅做输入格式与 HTML 内联图片改造。
-- `scripts/generate_drafts.py` 被 `email_agent/email_generator.py` 替代，可在升级完成后移除或归档。
-- `data/drafts/drafts.csv` 在首次升级时读取并迁移到 `data/drafts.json`，之后新系统只写 JSON。
+| 模块 | 验证命令 / 方法 |
+|------|----------------|
+| `config` | `python -c "from email_agent.config import load_available_models, get_active_model, load_sender_profile; print(...)` |
+| `llm_client` | 调用后检查返回结构含 `content` + `usage`。 |
+| `email_generator` | 生成单条草稿，检查 `drafts.json` 含 `generation_meta`、`model_used`、`language`。 |
+| `template_importer` | 放入 `.md/.docx/.pdf`，检查归档、预览、确认流程。 |
+| `preview` | 调用后浏览器打开或打印临时文件路径。 |
+| `sender` | 发送时按 Ctrl+C，检查 `sending_state.json`；续跑后不再重复发送。 |
+| `receiver` | 有回复时返回结构化列表并在浏览器中展示。 |
+| `status` | 通过改变 `.env`/模板确认/草稿状态验证红/黄/绿切换。 |
+| 端到端 | 完整跑通：模板确认 → 生成 → 浏览器审核 → 发送（中断续跑）→ 查回复。 |
