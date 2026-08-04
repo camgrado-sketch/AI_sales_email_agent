@@ -59,11 +59,27 @@ def _get_in_reply_to(msg):
     return ""
 
 
-def check_replies():
-    """Connect to IMAP and check for replies."""
+def _words(text, n=50):
+    import re
+    if not text:
+        return ""
+    tokens = re.findall(r"[一-龥]|[^一-龥\s]+", text)
+    if len(tokens) <= n:
+        return text.strip()
+    return "".join(tokens[:n]).strip() + "..."
+
+
+def check_replies(dry_run=False):
+    """Connect to IMAP and check for replies.
+
+    Returns a list of matched reply dicts. If dry_run is True, replies are not
+    written to reply_logs.csv.
+    """
     if not config.EMAIL_ACCOUNT or not config.EMAIL_PASSWORD:
         print("❌ Error: EMAIL_ACCOUNT or EMAIL_PASSWORD not set in .env")
-        return
+        return []
+
+    matched_replies = []
 
     try:
         print(f"Connecting to IMAP server {config.IMAP_SERVER}...")
@@ -74,7 +90,7 @@ def check_replies():
         status, messages = mail.search(None, "ALL")
         if status != "OK":
             print("No messages found or search failed.")
-            return
+            return []
 
         email_ids = messages[0].split()
         print(f"Found {len(email_ids)} messages in inbox. Checking for replies...")
@@ -86,10 +102,10 @@ def check_replies():
             if row.get("status") == "success":
                 msg_id = row.get("message_id", "").strip().strip("<>")
                 if msg_id:
-                    sent_by_message_id[msg_id] = row.get("email_id")
+                    sent_by_message_id[msg_id] = row
                 recipient = row.get("recipient", "").lower()
                 if recipient:
-                    sent_by_recipient[recipient] = row.get("email_id")
+                    sent_by_recipient[recipient] = row
 
         for e_id in email_ids[-20:]:
             res, msg_data = mail.fetch(e_id, "(RFC822)")
@@ -106,18 +122,34 @@ def check_replies():
                 subject_lower = subject.lower()
                 is_reply_subject = subject_lower.startswith("re:") or subject_lower.startswith("回复:")
 
-                matched_email_id = None
+                matched_row = None
                 in_reply_to = _get_in_reply_to(msg)
                 if in_reply_to and in_reply_to in sent_by_message_id:
-                    matched_email_id = sent_by_message_id[in_reply_to]
+                    matched_row = sent_by_message_id[in_reply_to]
                 elif sender_email in sent_by_recipient and is_reply_subject:
-                    matched_email_id = sent_by_recipient[sender_email]
+                    matched_row = sent_by_recipient[sender_email]
 
-                if matched_email_id:
+                if matched_row:
                     print(f"📥 Found Reply from {sender_email}: {subject}")
                     body = get_email_body(msg)
-                    short_body = body[:200].replace("\n", " ") + "..." if len(body) > 200 else body.replace("\n", " ")
-                    log_reply(matched_email_id, sender_email, date, short_body)
+                    short_body = _words(body, n=50)
+                    reply_info = {
+                        "email_id": matched_row.get("email_id", ""),
+                        "matched_subject": matched_row.get("subject", ""),
+                        "reply_subject": subject,
+                        "sender": sender_email,
+                        "receive_time": date,
+                        "body_excerpt": short_body,
+                        "full_body": body,
+                    }
+                    matched_replies.append(reply_info)
+                    if not dry_run:
+                        log_reply(
+                            matched_row.get("email_id", ""),
+                            sender_email,
+                            date,
+                            short_body,
+                        )
 
         mail.close()
         mail.logout()
@@ -125,3 +157,5 @@ def check_replies():
 
     except Exception as e:
         print(f"❌ IMAP Error: {e}")
+
+    return matched_replies
