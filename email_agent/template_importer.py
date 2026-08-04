@@ -1,4 +1,5 @@
 import hashlib
+import html
 import json
 import os
 import re
@@ -218,11 +219,72 @@ def _editable_text_nodes(soup):
         yield elem
 
 
+def _markdown_to_baseline_html(markdown):
+    """Create a minimal HTML document from extracted Markdown text.
+
+    Used when importing into a brand-new template that has no existing
+    template.html. Headings become h1/h2 tags; everything else becomes
+    paragraphs. Inline Markdown is stripped and HTML-escaped for safety.
+    """
+    lines = markdown.splitlines()
+    blocks = []
+    current = []
+    for line in lines:
+        if line.strip():
+            current.append(line)
+        else:
+            if current:
+                blocks.append(current)
+                current = []
+    if current:
+        blocks.append(current)
+
+    parts = []
+    for block in blocks:
+        # If the whole block is headings, emit real heading tags.
+        if all(re.match(r"^#{1,6}\s+", line.strip()) for line in block):
+            for line in block:
+                m = re.match(r"^(#{1,6})\s+(.*)$", line.strip())
+                if not m:
+                    continue
+                level = len(m.group(1))
+                text = html.escape(_strip_markdown(m.group(2)).strip())
+                if text:
+                    parts.append(f"<h{level}>{text}</h{level}>")
+            continue
+
+        # Otherwise treat the block as a paragraph.
+        text = " ".join(line.strip() for line in block)
+        text = html.escape(_strip_markdown(text).strip())
+        if text:
+            parts.append(f"<p>{text}</p>")
+
+    body = "\n".join(f"    {line}" for line in parts)
+    return f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Imported Template</title>
+    <style>
+        body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; max-width: 760px; margin: 40px auto; padding: 20px; line-height: 1.6; }}
+    </style>
+</head>
+<body>
+{body}
+</body>
+</html>"""
+
+
 def merge_markdown_into_template(template_name, markdown, language=None):
-    """Merge plain-text blocks from markdown into existing template.html."""
+    """Merge plain-text blocks from markdown into template.html.
+
+    If template.html does not exist yet (brand-new template or a previous
+    failed import left only config.yaml), create a baseline HTML document from
+    the markdown instead of raising an error.
+    """
     template_path = template_engine.get_template_path(template_name)
     if not os.path.exists(template_path):
-        raise FileNotFoundError(f"Template not found: {template_path}")
+        return _markdown_to_baseline_html(markdown)
 
     with open(template_path, "r", encoding="utf-8") as f:
         html = f.read()
