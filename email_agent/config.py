@@ -35,6 +35,10 @@ SENDER_MARKET_REGION = os.getenv("SENDER_MARKET_REGION", "Global")
 SENDER_PHONE = os.getenv("SENDER_PHONE", "")
 SENDER_EMAIL = os.getenv("SENDER_EMAIL", EMAIL_ACCOUNT or "")
 
+# Optional external browser command for HTML previews (overrides platform default)
+# Examples: "firefox", "google-chrome %s", "wslview %s", "cmd.exe /c start %s"
+BROWSER = os.getenv("BROWSER", "").strip()
+
 # -----------------------------------------------------------------------------
 # Safety Settings for Demo Phase
 # -----------------------------------------------------------------------------

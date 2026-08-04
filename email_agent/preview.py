@@ -2,6 +2,9 @@ import base64
 import mimetypes
 import os
 import re
+import shlex
+import shutil
+import subprocess
 import tempfile
 import webbrowser
 
@@ -36,6 +39,66 @@ def _inline_images(html, images):
     return re.sub(r'cid:([^"\'\s\)\>]+)', replace_cid, html)
 
 
+def _is_wsl():
+    """Detect Windows Subsystem for Linux."""
+    if os.environ.get("WSL_DISTRO_NAME") or os.environ.get("WSL_INTEROP"):
+        return True
+    try:
+        with open("/proc/sys/kernel/osrelease", "r", encoding="utf-8") as f:
+            release = f.read().lower()
+            return "microsoft" in release or "wsl" in release
+    except Exception:
+        return False
+
+
+def _open_with_browser_command(cmd, path):
+    """Open path with a user-configured browser command.
+
+    Supports the standard `%s` placeholder or appends the path to the command.
+    """
+    try:
+        if "%s" in cmd:
+            full_cmd = cmd.replace("%s", path)
+            subprocess.Popen(full_cmd, shell=True,
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        else:
+            parts = shlex.split(cmd)
+            subprocess.Popen(parts + [path],
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        return True
+    except Exception as e:
+        print(f"⚠️ Could not open with configured browser '{cmd}': {e}")
+        return False
+
+
+def _open_wsl_browser(path):
+    """Try WSL-specific ways to open a file in the Windows default browser."""
+    commands = [
+        ["wslview", path],
+        ["powershell.exe", "-Command", f'Start-Process "{path}"'],
+        ["cmd.exe", "/c", "start", "", path],
+    ]
+    for cmd in commands:
+        try:
+            if shutil.which(cmd[0]) is None:
+                continue
+            subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            return True
+        except Exception as e:
+            print(f"⚠️ Could not open with {cmd[0]}: {e}")
+    return False
+
+
+def _copy_to_latest_preview(path):
+    """Keep a stable fallback copy so the user can open it manually."""
+    try:
+        latest = os.path.join(config.DATA_DIR, "latest_preview.html")
+        shutil.copy2(path, latest)
+        return latest
+    except Exception:
+        return None
+
+
 def _open_html(html, suffix=".html"):
     """Write HTML to a temp file and open it in the default browser."""
     fd, path = tempfile.mkstemp(suffix=suffix, prefix="email_agent_", text=True)
@@ -45,11 +108,29 @@ def _open_html(html, suffix=".html"):
     except Exception:
         os.close(fd)
         raise
-    try:
-        webbrowser.open(f"file://{path}")
-    except Exception as e:
-        print(f"⚠️ Could not open browser: {e}")
-        print(f"   Preview saved to: {path}")
+
+    opened = False
+    browser_cmd = (config.BROWSER or os.environ.get("BROWSER", "")).strip()
+
+    if browser_cmd:
+        opened = _open_with_browser_command(browser_cmd, path)
+
+    if not opened:
+        try:
+            opened = bool(webbrowser.open(f"file://{path}"))
+        except Exception as e:
+            print(f"⚠️ Could not open browser: {e}")
+
+    if not opened and _is_wsl():
+        opened = _open_wsl_browser(path)
+
+    if not opened:
+        latest = _copy_to_latest_preview(path)
+        print("⚠️ No browser detected. Open the preview manually:")
+        print(f"   {path}")
+        if latest:
+            print(f"   Stable copy: {latest}")
+
     return path
 
 

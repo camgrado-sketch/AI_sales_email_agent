@@ -299,10 +299,10 @@ def menu_import_template():
     # Preview and confirm
     for name in template_engine.list_templates():
         try:
-            preview_path = template_importer.build_preview_html(name)
+            preview_html = template_importer.build_preview_html(name)
             from email_agent.preview import _open_html
-            _open_html(preview_path)
-            print(f"🌐 Browser preview opened for '{name}'.")
+            preview_path = _open_html(preview_html)
+            print(f"🌐 Browser preview opened for '{name}': {preview_path}")
         except Exception as e:
             print(f"⚠️ Could not open preview for '{name}': {e}")
 
