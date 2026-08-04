@@ -12,6 +12,18 @@ from email_agent import config, data_store, deliverability
 from email_agent.logger import log_email_send
 
 
+def _is_skipped_customer(draft):
+    """Drafts for customers whose original name started with '#' are skipped."""
+    # Try to look up the customer record; fall back to parsing draft fields.
+    customer_id = draft.get("customer_id", "")
+    for customer in data_store.load_customers():
+        cid = customer.get("id") or customer.get("customer_id")
+        if cid == customer_id:
+            name = (customer.get("name") or "").strip()
+            return name.startswith("#")
+    return False
+
+
 def _attach_images(msg, images):
     """Attach inline images with Content-ID headers."""
     for image in images:
@@ -77,7 +89,7 @@ def send_email(draft):
         return False
 
     msg, msg_id = create_email_message(draft)
-    email_id = f"{datetime.now().strftime('%Y%m%d')}-{customer_id}"
+    email_id = draft.get("draft_id") or f"{datetime.now().strftime('%Y%m%d')}-{customer_id}"
 
     try:
         print(f"Connecting to {config.SMTP_SERVER}...")
@@ -115,23 +127,76 @@ def send_email(draft):
         return False
 
 
+def _save_sending_state(sent_ids, remaining_drafts):
+    data_store.save_sending_state({
+        "started_at": datetime.now().isoformat(),
+        "sent_draft_ids": list(sent_ids),
+        "remaining_draft_ids": [d.get("draft_id") for d in remaining_drafts if d.get("draft_id")],
+    })
+
+
 def process_queue(drafts=None):
-    """Read approved drafts and send them with rate limiting."""
+    """Read approved drafts and send them with rate limiting.
+
+    Supports pause/resume via Ctrl+C. State is stored in sending_state.json.
+    """
+    if not config.is_template_confirmed():
+        print("❌ No template confirmed. Please import and confirm a template first (menu 8).")
+        return
+
     if drafts is None:
         drafts = data_store.load_drafts()
 
-    to_send = [d for d in drafts if d.get("review_status", "").lower() in ("approved", "pass")]
-
-    if not to_send:
+    approved = [d for d in drafts if d.get("review_status", "").lower() in ("approved", "pass")]
+    if not approved:
         print("No approved drafts found to send.")
+        data_store.clear_sending_state()
         return
 
-    print(f"Found {len(to_send)} approved draft(s) to send.")
+    state = data_store.load_sending_state()
+    sent_ids = set(state.get("sent_draft_ids", []))
+    remaining_ids = set(state.get("remaining_draft_ids", []))
 
-    for i, draft in enumerate(to_send):
-        success = send_email(draft)
-        if i < len(to_send) - 1 and success:
-            deliverability.wait_before_next()
+    if remaining_ids:
+        # Resume from saved state
+        to_send = [d for d in approved if d.get("draft_id") in remaining_ids]
+        if not to_send:
+            to_send = approved
+    else:
+        to_send = approved
+
+    # Skip already-sent and # customers
+    already_sent = sent_ids | data_store.get_sent_draft_ids()
+    to_send = [d for d in to_send if d.get("draft_id") not in already_sent and not _is_skipped_customer(d)]
+
+    if not to_send:
+        print("All approved drafts have already been sent.")
+        data_store.clear_sending_state()
+        return
+
+    print(f"Found {len(to_send)} approved draft(s) to send. Press Ctrl+C to pause.")
+
+    remaining = list(to_send)
+    try:
+        for i, draft in enumerate(to_send):
+            draft_id = draft.get("draft_id")
+            remaining = to_send[i + 1:]
+            print(f"\n[Ctrl+C to pause] Sending {i + 1}/{len(to_send)}: {draft.get('email')}")
+            success = send_email(draft)
+            if success:
+                sent_ids.add(draft_id)
+            _save_sending_state(sent_ids, remaining)
+
+            if remaining:
+                deliverability.wait_before_next()
+
+        data_store.clear_sending_state()
+        print("\n✅ All approved drafts processed.")
+
+    except KeyboardInterrupt:
+        print("\n⏸️  Sending paused by user.")
+        _save_sending_state(sent_ids, remaining)
+        print("💡 Tip: Run option 3 again to resume from where you left off.")
 
 
 # Backward-compatible alias for legacy CLI callers
