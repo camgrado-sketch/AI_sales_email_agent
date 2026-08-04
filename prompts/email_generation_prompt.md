@@ -20,7 +20,7 @@
 
 ## 输出要求
 必须输出以下三个字段（JSON）：
-1. `subject`: 邮件标题（简短专业，避免广告感）。
+1. `subject`: 邮件标题（简短专业，避免广告感）。标题不得以 `Re:`、`回复：`、`FW:`、`转发：` 等回复/转发前缀开头。
 2. `personalization_note`: 内部标注，一句话说明针对该客户的哪个字段做了具体个性化调整。
 3. `variables`: 对象，包含模板 `config.yaml` 中声明的所有变量，变量值为字符串。
    - 必须包含 `sender_name`、`sender_title`、`market_region`。
