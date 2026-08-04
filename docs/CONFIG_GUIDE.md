@@ -10,7 +10,7 @@
 
 - Python 3.10+
 - 建议使用虚拟环境
-- 需要能打开浏览器的桌面环境用于预览；WSL/无桌面环境会回退为打印临时文件路径
+- 如需自动打开浏览器预览，需要桌面环境或正确配置 `BROWSER` 变量；WSL/无桌面环境会回退为打印临时文件路径
 
 ```bash
 python3 -m venv .venv
@@ -112,7 +112,33 @@ MODEL_3_TEMPERATURE=0.7
 - `ACTIVE_MODEL_INDEX` 可强制指定启动时的模型索引（优先级高于 `settings.json`）。
 - 菜单 7 会显示 `[编号] 模型名 (模型ID)`，输入编号即可切换；当前选择写入 `data/settings.json` 的 `active_model_index`。
 
-### 2.5 快速检查
+### 2.5 浏览器预览配置（可选）
+
+如果系统无法自动唤起浏览器（常见于 WSL / 无桌面环境 / 远程服务器），可在 `.env` 中指定浏览器命令：
+
+| 变量 | 说明 | 示例 |
+|------|------|------|
+| `BROWSER` | 打开 HTML 预览的命令 | `firefox`、`google-chrome %s`、`wslview %s`、`cmd.exe /c start %s` |
+
+示例：
+
+```env
+# WSL 下使用 Windows 默认浏览器
+BROWSER=wslview %s
+
+# 指定 Chrome
+BROWSER=google-chrome %s
+```
+
+优先级：
+
+1. `.env` 中的 `BROWSER`。
+2. 环境变量 `BROWSER`。
+3. 系统默认浏览器（`webbrowser.open`）。
+4. WSL 自动回退：`wslview` → `powershell.exe Start-Process` → `cmd.exe /c start`。
+5. 全部失败时，终端会打印预览文件路径，并复制一份到 `data/latest_preview.html`，可手动打开。
+
+### 2.6 快速检查
 
 ```bash
 source .venv/bin/activate
@@ -486,7 +512,7 @@ print("LLM raw response:", raw)
 |------|------|------|
 | 状态栏红色，提示 Template not confirmed | 模板未确认 | 进入菜单 8 导入/确认模板 |
 | 生成/发送菜单被阻断 | 模板未确认 | 同上 |
-| 浏览器没有自动弹出 | 无桌面环境 | 手动复制终端打印的临时 HTML 路径到浏览器 |
+| 浏览器没有自动弹出 | 无桌面环境 / WSL 未找到浏览器 | 在 `.env` 设置 `BROWSER=wslview %s` 或 `BROWSER=google-chrome %s`；也可手动打开终端打印的 HTML 路径 |
 | `ModuleNotFoundError: No module named 'email_agent'` | 未设置 `PYTHONPATH` | 在项目根目录运行，或 `export PYTHONPATH=$(pwd)` |
 | `LLM_API_KEY is not set in .env` | 未配置 LLM 密钥 | 配置单模型变量或多模型块 |
 | `Blocked by Demo Mode` | 收件人不在白名单 | 将测试邮箱加入 `ALLOWED_TEST_EMAILS` |
