@@ -1,7 +1,7 @@
 import os
 import sys
 
-from email_agent import config, data_store
+from email_agent import config, data_store, status, template_engine, template_importer
 
 
 def _clear_screen():
@@ -12,6 +12,7 @@ def _print_header():
     print("=" * 60)
     print("     🤖 AI Sales Email Agent - Interactive Console")
     print("=" * 60)
+    status.print_status_bar()
 
 
 def _print_menu():
@@ -22,8 +23,10 @@ def _print_menu():
     print("  4. Check replies")
     print("  5. View logs")
     print("  6. Configuration check")
-    print("  7. Toggle skill mode")
-    print("  8. Delete drafts")
+    print("  7. Switch active model")
+    print("  8. Import / confirm template")
+    print("  9. Toggle skill mode")
+    print("  D. Delete drafts")
     print("  0. Exit")
     print()
 
@@ -32,8 +35,17 @@ def _wait_for_enter():
     input("\nPress Enter to return to the menu...")
 
 
+def _require_confirmed_template():
+    if not config.is_template_confirmed():
+        print("❌ No template confirmed. Please go to menu 8 to import/confirm a template first.")
+        return False
+    return True
+
+
 def menu_generate():
     print("\n[Generate Drafts]")
+    if not _require_confirmed_template():
+        return
     print("This will analyze customers and generate personalized email drafts.")
     confirm = input("Proceed? (Y/n): ").strip().lower()
     if confirm and confirm not in ("y", "yes"):
@@ -41,10 +53,9 @@ def menu_generate():
         return
 
     try:
-        # Lazy import to avoid circular dependencies while other modules are developed
         from email_agent.email_generator import generate_all
         drafts = generate_all()
-        print(f"✅ Generated {len(drafts)} draft(s). Saved to {config.DRAFTS_JSON_FILE}")
+        print(f"✅ Generated/loaded {len(drafts)} draft(s). Saved to {config.DRAFTS_JSON_FILE}")
     except Exception as e:
         print(f"❌ Error generating drafts: {e}")
 
@@ -57,16 +68,21 @@ def menu_review():
         return
 
     print(f"Found {len(drafts)} pending draft(s). Reviewing one by one...\n")
+    from email_agent.preview import open_draft_preview
+
     for draft in drafts:
         print("-" * 60)
         print(f"Customer: {draft.get('customer_id')} <{draft.get('email')}>")
-        print(f"Template: {draft.get('template')} | Stage: {draft.get('stage')}")
+        print(f"Template: {draft.get('template')} | Stage: {draft.get('stage')} | Language: {draft.get('language', 'default')}")
         print(f"Subject: {draft.get('subject')}")
         print(f"Personalization: {draft.get('personalization_note')}")
-        print("\nBody preview (first 400 chars):")
-        text = draft.get("text_body") or draft.get("html_body", "")
-        print(text[:400] + ("..." if len(text) > 400 else ""))
-        print()
+        print(f"Model: {draft.get('model_used')} | Tokens: {draft.get('generation_meta', {}).get('total_tokens', 0)}")
+
+        try:
+            preview_path = open_draft_preview(draft)
+            print(f"🌐 Browser preview opened: {preview_path}")
+        except Exception as e:
+            print(f"⚠️ Could not open browser preview: {e}")
 
         while True:
             choice = input("[Y] Approve  [N] Reject  [S] Skip  [E] Edit  [Q] Quit review: ").strip().lower()
@@ -104,6 +120,8 @@ def menu_review():
 
 def menu_send():
     print("\n[Send Approved Emails]")
+    if not _require_confirmed_template():
+        return
     from email_agent.sender import process_queue
     process_queue()
 
@@ -111,7 +129,38 @@ def menu_send():
 def menu_check_replies():
     print("\n[Check Replies]")
     from email_agent.receiver import check_replies
-    check_replies()
+    from email_agent.preview import open_replies_preview
+
+    replies = check_replies(dry_run=True)
+    if replies:
+        try:
+            preview_path = open_replies_preview(replies)
+            print(f"🌐 Browser preview opened: {preview_path}")
+        except Exception as e:
+            print(f"⚠️ Could not open browser preview: {e}")
+
+        while True:
+            choice = input("[S] Save replies to log  [R] Refresh  [Q] Quit: ").strip().lower()
+            if choice in ("s", "save"):
+                check_replies(dry_run=False)
+                print("✅ Replies saved to reply_logs.csv.")
+                break
+            elif choice in ("r", "refresh"):
+                replies = check_replies(dry_run=True)
+                if replies:
+                    try:
+                        open_replies_preview(replies)
+                    except Exception as e:
+                        print(f"⚠️ Could not refresh preview: {e}")
+                else:
+                    print("No replies found.")
+            elif choice in ("q", "quit"):
+                print("Cancelled without saving.")
+                break
+            else:
+                print("Invalid choice.")
+    else:
+        print("No replies found.")
 
 
 def menu_logs():
@@ -130,12 +179,17 @@ def menu_logs():
 
 def menu_config():
     print("\n[Configuration Check]")
+    active = config.get_active_model()
     print(f"Email account:     {config.EMAIL_ACCOUNT or 'NOT SET'}")
     print(f"Email password:    {'SET' if config.EMAIL_PASSWORD else 'NOT SET'}")
-    print(f"LLM API key:       {'SET' if config.LLM_API_KEY else 'NOT SET'}")
-    print(f"LLM model:         {config.LLM_MODEL}")
-    print(f"LLM base URL:      {config.LLM_BASE_URL or 'default'}")
+    print(f"Active model:      {active.get('name') if active else 'NOT SET'} ({active.get('model') if active else ''})")
+    print(f"Active base URL:   {active.get('base_url') or 'default' if active else ''}")
+    print(f"Sender profile:    {config.SENDER_PROFILE_FILE}")
+    print(f"  name:            {config.load_sender_profile().get('sender_name')}")
+    print(f"  title:           {config.load_sender_profile().get('sender_title')}")
+    print(f"  region:          {config.load_sender_profile().get('sender_market_region')}")
     print(f"Skill mode:        {config.SKILL_MODE}")
+    print(f"Template confirmed:{config.is_template_confirmed()}")
     print(f"Demo mode:         {config.DEMO_MODE}")
     print(f"Allowed emails:    {config.ALLOWED_TEST_EMAILS}")
     print(f"Daily send limit:  {config.MAX_DAILY_SENDS}")
@@ -143,6 +197,124 @@ def menu_config():
     print(f"Drafts JSON:       {config.DRAFTS_JSON_FILE}")
     print(f"Templates dir:     {config.TEMPLATES_DIR}")
     print(f"Images dir:        {config.IMAGES_DIR}")
+
+
+def menu_switch_model():
+    print("\n[Switch Active Model]")
+    models = config.load_available_models()
+    if not models:
+        print("❌ No models configured. Check .env")
+        return
+
+    print("Available models:")
+    for i, m in enumerate(models):
+        marker = " *" if i == config._active_model_index() else "  "
+        print(f"{marker}[{i}] {m.get('name')} ({m.get('model')})")
+
+    choice = input(f"Select model (0-{len(models)-1}) or press Enter to keep: ").strip()
+    if not choice:
+        print("No change.")
+        return
+    try:
+        idx = int(choice)
+        if idx < 0 or idx >= len(models):
+            print("Invalid selection.")
+            return
+    except ValueError:
+        print("Invalid input.")
+        return
+
+    settings = data_store.load_settings()
+    settings["active_model_index"] = idx
+    data_store.save_settings(settings)
+    print(f"✅ Active model switched to [{idx}] {models[idx].get('name')}.")
+
+
+def menu_import_template():
+    print("\n[Import / Confirm Template]")
+    try:
+        changes = template_importer.detect_changes()
+    except Exception as e:
+        print(f"❌ Could not scan import folder: {e}")
+        return
+
+    if not changes:
+        print("No new template files detected in templates/import/.")
+        print("\nCurrent templates:")
+        for name in template_engine.list_templates():
+            langs = template_engine.list_template_languages(name)
+            print(f"  - {name}: {', '.join(langs)}")
+
+        if config.is_template_confirmed():
+            print("\nTemplate is already confirmed.")
+            reset = input("Reset confirmation and require re-confirmation? (y/N): ").strip().lower()
+            if reset == "y":
+                settings = data_store.load_settings()
+                settings["template_confirmed"] = False
+                data_store.save_settings(settings)
+                print("Confirmation reset. Please review and confirm below.")
+            else:
+                return
+    else:
+        print(f"Found {len(changes)} new/updated file(s):")
+        for i, cand in enumerate(changes, start=1):
+            print(f"  [{i}] {cand.filename}")
+
+        choice = input("Select file number to import (or 0 to cancel): ").strip()
+        if choice == "0":
+            print("Cancelled.")
+            return
+        try:
+            idx = int(choice) - 1
+            if idx < 0 or idx >= len(changes):
+                print("Invalid selection.")
+                return
+        except ValueError:
+            print("Invalid input.")
+            return
+
+        candidate = changes[idx]
+        default_name = template_importer._template_name_from_filename(candidate.filename)
+        print(f"Inferred template name: {default_name}")
+        name_input = input("Enter template name to import into (or press Enter to use inferred): ").strip()
+        template_name = name_input or default_name
+
+        has_work, reason = template_importer.has_unfinished_work(template_name)
+        if has_work:
+            print(f"\n⚠️ Warning: current template has unfinished work: {reason}")
+            force = input("Importing will archive the current template. Continue? (y/N): ").strip().lower()
+            if force != "y":
+                print("Cancelled.")
+                return
+
+        try:
+            result = template_importer.activate_template(template_name, candidate.path, force=True)
+            print(f"✅ Imported as '{result['template_name']}' ({result['source_language']}).")
+            print(f"   Archived old template to: {result['archive_path']}")
+            template_importer.save_import_state()
+        except Exception as e:
+            print(f"❌ Import failed: {e}")
+            return
+
+    # Preview and confirm
+    for name in template_engine.list_templates():
+        try:
+            preview_path = template_importer.build_preview_html(name)
+            from email_agent.preview import _open_html
+            _open_html(preview_path)
+            print(f"🌐 Browser preview opened for '{name}'.")
+        except Exception as e:
+            print(f"⚠️ Could not open preview for '{name}': {e}")
+
+    if config.is_template_confirmed():
+        print("\nTemplate already confirmed.")
+    else:
+        confirm = input("Confirm this template for generation/sending? (Y/n): ").strip().lower()
+        if confirm in ("y", "yes"):
+            template_importer.confirm_active_template()
+            print("✅ Template confirmed.")
+        else:
+            print("Template remains unconfirmed. Generation and sending are blocked.")
 
 
 def menu_toggle_skill():
@@ -236,9 +408,15 @@ def run():
             menu_config()
             _wait_for_enter()
         elif choice == "7":
-            menu_toggle_skill()
+            menu_switch_model()
             _wait_for_enter()
         elif choice == "8":
+            menu_import_template()
+            _wait_for_enter()
+        elif choice == "9":
+            menu_toggle_skill()
+            _wait_for_enter()
+        elif choice.lower() == "d":
             menu_delete_drafts()
             _wait_for_enter()
         elif choice == "0":
