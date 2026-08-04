@@ -26,8 +26,33 @@ def get_template_config(template_name):
         return yaml.safe_load(f)
 
 
-def _load_template_html(template_name):
-    path = os.path.join(config.TEMPLATES_DIR, template_name, "template.html")
+def get_template_path(template_name, language=None):
+    """Return the HTML path for a template, optionally choosing a language variant."""
+    dir_path = os.path.join(config.TEMPLATES_DIR, template_name)
+    if language:
+        lang_path = os.path.join(dir_path, f"template_{language}.html")
+        if os.path.exists(lang_path):
+            return lang_path
+    return os.path.join(dir_path, "template.html")
+
+
+def list_template_languages(template_name):
+    """List available language variants for a template."""
+    dir_path = os.path.join(config.TEMPLATES_DIR, template_name)
+    if not os.path.exists(dir_path):
+        return []
+    languages = []
+    if os.path.exists(os.path.join(dir_path, "template.html")):
+        languages.append("default")
+    for fname in os.listdir(dir_path):
+        m = re.match(r"template_([a-z]+)\.html$", fname)
+        if m:
+            languages.append(m.group(1))
+    return languages
+
+
+def _load_template_html(template_name, language=None):
+    path = get_template_path(template_name, language)
     if not os.path.exists(path):
         raise FileNotFoundError(f"Template HTML not found: {path}")
     with open(path, "r", encoding="utf-8") as f:
@@ -45,19 +70,20 @@ def _find_image_file(image_name):
     return None
 
 
-def render(template_name, variables):
+def render(template_name, variables, language=None):
     """
     Render an HTML email template.
 
     Args:
         template_name: Name of the template directory under templates/email.
         variables: Dict of placeholder values.
+        language: Optional language code to select template_<lang>.html.
 
     Returns:
         Tuple of (html_body, images) where images is a list of dicts with
         'cid' and 'path' keys for inline image attachments.
     """
-    html = _load_template_html(template_name)
+    html = _load_template_html(template_name, language)
     images = []
 
     # Replace image placeholders: {{IMAGE:name}}

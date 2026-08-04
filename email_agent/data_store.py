@@ -37,6 +37,15 @@ def load_email_logs():
     return _read_csv(config.EMAIL_LOGS_FILE)
 
 
+def get_sent_draft_ids():
+    """Return draft_ids already logged as successfully sent."""
+    return {
+        row.get("email_id", "")
+        for row in load_email_logs()
+        if row.get("status") == "success" and row.get("email_id")
+    }
+
+
 def load_reply_logs():
     """Load received reply logs."""
     return _read_csv(config.REPLY_LOGS_FILE)
@@ -61,6 +70,13 @@ def save_drafts(drafts):
     _ensure_dir(config.DRAFTS_JSON_FILE)
     with open(config.DRAFTS_JSON_FILE, "w", encoding="utf-8") as f:
         json.dump(drafts, f, ensure_ascii=False, indent=2)
+
+
+def append_draft(draft):
+    """Append a single draft to drafts.json immediately after generation."""
+    drafts = load_drafts()
+    drafts.append(draft)
+    save_drafts(drafts)
 
 
 def update_draft_status(draft_id, status):
@@ -141,6 +157,68 @@ def clear_generation_state():
     """Remove generation_state.json when all customers are done."""
     if os.path.exists(_GENERATION_STATE_FILE):
         os.remove(_GENERATION_STATE_FILE)
+
+
+# ------------------------------------------------------------------------------
+# Sending pause/resume state
+# ------------------------------------------------------------------------------
+_SENDING_STATE_FILE = config.SENDING_STATE_FILE
+
+
+def load_sending_state():
+    """Load sending state dict; return empty defaults if missing/corrupt."""
+    if not os.path.exists(_SENDING_STATE_FILE) or os.path.getsize(_SENDING_STATE_FILE) == 0:
+        return {"started_at": "", "sent_draft_ids": [], "remaining_draft_ids": []}
+    try:
+        with open(_SENDING_STATE_FILE, "r", encoding="utf-8") as f:
+            state = json.load(f)
+            if not isinstance(state, dict):
+                return {"started_at": "", "sent_draft_ids": [], "remaining_draft_ids": []}
+            return {
+                "started_at": state.get("started_at", ""),
+                "sent_draft_ids": list(state.get("sent_draft_ids", [])),
+                "remaining_draft_ids": list(state.get("remaining_draft_ids", [])),
+            }
+    except json.JSONDecodeError:
+        return {"started_at": "", "sent_draft_ids": [], "remaining_draft_ids": []}
+
+
+def save_sending_state(state):
+    """Persist sending state dict to sending_state.json."""
+    _ensure_dir(_SENDING_STATE_FILE)
+    with open(_SENDING_STATE_FILE, "w", encoding="utf-8") as f:
+        json.dump(state, f, ensure_ascii=False, indent=2)
+
+
+def clear_sending_state():
+    """Remove sending_state.json when the queue is exhausted."""
+    if os.path.exists(_SENDING_STATE_FILE):
+        os.remove(_SENDING_STATE_FILE)
+
+
+# ------------------------------------------------------------------------------
+# Template import state (checksums)
+# ------------------------------------------------------------------------------
+_TEMPLATE_IMPORT_STATE_FILE = config.TEMPLATE_IMPORT_STATE_FILE
+
+
+def load_template_import_state():
+    """Load template import checksum state."""
+    if not os.path.exists(_TEMPLATE_IMPORT_STATE_FILE) or os.path.getsize(_TEMPLATE_IMPORT_STATE_FILE) == 0:
+        return {}
+    try:
+        with open(_TEMPLATE_IMPORT_STATE_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+            return data if isinstance(data, dict) else {}
+    except json.JSONDecodeError:
+        return {}
+
+
+def save_template_import_state(state):
+    """Persist template import checksum state."""
+    _ensure_dir(_TEMPLATE_IMPORT_STATE_FILE)
+    with open(_TEMPLATE_IMPORT_STATE_FILE, "w", encoding="utf-8") as f:
+        json.dump(state, f, ensure_ascii=False, indent=2)
 
 
 # ------------------------------------------------------------------------------

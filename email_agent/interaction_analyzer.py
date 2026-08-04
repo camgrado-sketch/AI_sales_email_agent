@@ -3,6 +3,29 @@ import json
 from email_agent import config, data_store, llm_client
 
 
+def _detect_language(location):
+    """Determine email language from customer location.
+
+    Explicit suffixes override everything:
+      - (中文) / (Chinese)  -> cn
+      - (英文) / (English)  -> en
+
+    Without suffix:
+      - Mainland China -> cn
+      - Hong Kong, Taiwan, and other overseas -> en
+    """
+    loc = (location or "").lower()
+    if "(中文)" in loc or "(chinese)" in loc:
+        return "cn"
+    if "(英文)" in loc or "(english)" in loc:
+        return "en"
+    if any(k in loc for k in ("中国", "大陆", "北京", "上海", "广州", "深圳", "成都", "杭州")):
+        return "cn"
+    if any(k in loc for k in ("香港", "台湾", "hong kong", "taiwan")):
+        return "en"
+    return "en"
+
+
 def _rule_based_stage(history):
     """Determine sales stage from email/reply history."""
     if history["reply_count"] > 0:
@@ -19,7 +42,7 @@ def _llm_strategy(customer, history):
     Ask the LLM for a strategy and template recommendation.
     Falls back to a default if no API key is configured.
     """
-    if not config.LLM_API_KEY:
+    if not config.get_active_model():
         return None
 
     system_prompt = """You are a sales strategy assistant for GRADO CONTRACT, a furniture brand.
@@ -60,7 +83,7 @@ Return JSON with:
 
     try:
         raw = llm_client.complete_json(system_prompt, user_prompt, schema, temperature=0.3)
-        return json.loads(raw)
+        return json.loads(raw["content"])
     except Exception:
         return None
 
@@ -73,7 +96,7 @@ def analyze(customer):
         customer: Dict representing a customer row from customers.csv.
 
     Returns:
-        Dict with keys: stage, template_type, strategy, reason.
+        Dict with keys: stage, template_type, strategy, reason, language.
     """
     customer_id = customer.get("id") or customer.get("customer_id")
     history = data_store.get_customer_history(customer_id)
@@ -91,6 +114,7 @@ def analyze(customer):
         "template_type": template_type,
         "strategy": "",
         "reason": f"Rule-based: sent={history['sent_count']}, replies={history['reply_count']}",
+        "language": _detect_language(customer.get("location", "")),
     }
 
     llm_result = _llm_strategy(customer, history)

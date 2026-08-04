@@ -1,5 +1,6 @@
 import json
 import os
+import re
 from datetime import datetime
 
 from email_agent import config, data_store, interaction_analyzer, llm_client, template_engine
@@ -48,7 +49,13 @@ def _build_system_prompt(template_config):
     writing_skill = _read_file(skill_file)
     generation_prompt = _read_file(config.EMAIL_GENERATION_PROMPT_FILE)
     rules = "\n".join(f"- {r}" for r in template_config.get("rules", []))
+    sender = config.load_sender_profile()
     return f"""You are a professional business email writer representing GRADO CONTRACT.
+
+Sender identity (MUST use exactly, do not invent):
+- sender_name: {sender.get('sender_name', '')}
+- sender_title: {sender.get('sender_title', '')}
+- market_region: {sender.get('sender_market_region', '')}
 
 Follow the brand writing skill below strictly:
 
@@ -78,16 +85,21 @@ Sales stage analysis:
 - Stage: {analysis['stage']}
 - Recommended template: {analysis['template_type']}
 - Strategy: {analysis['strategy']}
+- Language: {analysis.get('language', 'cn')}
 
 Fill in the template variables and produce the subject line and personalization note.
-Language rule: use Chinese for mainland China customers and English for international customers."""
+Language rule: the email body must be written entirely in the language specified above. Do not mix Chinese and English in the same paragraph."""
 
 
-def generate_for_customer(customer):
-    """Generate a single draft for a customer."""
+def generate_for_customer(customer, language=None):
+    """Generate a single draft for a customer and persist it immediately."""
+    if not config.is_template_confirmed():
+        raise RuntimeError("No template confirmed. Please import and confirm a template first (menu 8).")
+
     customer_id = customer.get("id") or customer.get("customer_id")
     analysis = interaction_analyzer.analyze(customer)
     template_name = analysis["template_type"]
+    chosen_language = language or analysis.get("language", "cn")
 
     template_config = template_engine.get_template_config(template_name)
     schema = _build_variable_schema(template_config)
@@ -95,26 +107,30 @@ def generate_for_customer(customer):
     system_prompt = _build_system_prompt(template_config)
     user_prompt = _build_user_prompt(customer, analysis)
 
+    start_time = datetime.now()
     raw = llm_client.complete_json(system_prompt, user_prompt, schema, temperature=0.7)
-    result = json.loads(raw)
+    result = json.loads(raw["content"])
 
     variables = result.get("variables", {})
-    # Inject sender defaults if not provided by LLM
-    variables.setdefault("sender_name", config.SENDER_NAME)
-    variables.setdefault("sender_title", config.SENDER_TITLE)
-    variables.setdefault("market_region", config.SENDER_MARKET_REGION)
-    variables.setdefault("customer_first_name", _extract_first_name(customer.get("name", "")))
-    variables.setdefault("company_name", customer.get("company", ""))
+    sender = config.load_sender_profile()
+    # Override sender identity strictly from sender_profile/.env
+    variables["sender_name"] = sender.get("sender_name", config.SENDER_NAME)
+    variables["sender_title"] = sender.get("sender_title", config.SENDER_TITLE)
+    variables["market_region"] = sender.get("sender_market_region", config.SENDER_MARKET_REGION)
+    variables["customer_first_name"] = _extract_first_name(customer.get("name", ""))
+    variables["company_name"] = customer.get("company", "")
 
-    html_body, images = template_engine.render(template_name, variables)
+    html_body, images = template_engine.render(template_name, variables, language=chosen_language)
 
+    active_model = config.get_active_model()
     draft_id = data_store.generate_draft_id(customer_id)
-    return {
+    draft = {
         "draft_id": draft_id,
         "customer_id": customer_id,
         "email": customer.get("email", ""),
         "template": template_name,
         "stage": analysis["stage"],
+        "language": chosen_language,
         "subject": result.get("subject", ""),
         "html_body": html_body,
         "text_body": _html_to_text(html_body),
@@ -122,12 +138,28 @@ def generate_for_customer(customer):
         "personalization_note": result.get("personalization_note", ""),
         "review_status": "pending",
         "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "model_used": active_model.get("name", active_model.get("model", "")) if active_model else "",
+        "generation_meta": {
+            "generation_time": start_time.isoformat(),
+            "prompt_tokens": raw["usage"]["prompt_tokens"],
+            "completion_tokens": raw["usage"]["completion_tokens"],
+            "total_tokens": raw["usage"]["total_tokens"],
+        },
     }
+
+    data_store.append_draft(draft)
+    return draft
 
 
 def _html_to_text(html_body):
-    """Very basic HTML-to-text fallback for CLI preview."""
+    """Strip HTML tags and decode entities for a clean text preview."""
+    import html
+
     text = html_body
+    # Remove style/script blocks
+    text = re.sub(r"<style[^>]*>[\s\S]*?</style>", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"<script[^>]*>[\s\S]*?</script>", "", text, flags=re.IGNORECASE)
+    # Convert common block tags to newlines
     text = text.replace("\n", " ")
     text = text.replace("</p>", "\n")
     text = text.replace("</div>", "\n")
@@ -135,10 +167,16 @@ def _html_to_text(html_body):
     text = text.replace("<br/>", "\n")
     text = text.replace("<br />", "\n")
     # Strip remaining tags
-    import re
     text = re.sub(r"<[^>]+>", "", text)
+    text = html.unescape(text)
     text = re.sub(r"\n\s*\n", "\n", text)
     return text.strip()
+
+
+def _is_skipped_customer(customer):
+    """Customers whose name starts with '#' are skipped for generation/sending."""
+    name = (customer.get("name") or "").strip()
+    return name.startswith("#")
 
 
 def generate_all(customers=None):
@@ -147,6 +185,10 @@ def generate_all(customers=None):
     Supports pause/resume: press Ctrl+C to pause. Re-run to resume from the
     next unprocessed customer.
     """
+    if not config.is_template_confirmed():
+        print("❌ No template confirmed. Please import and confirm a template first (menu 8).")
+        return []
+
     if customers is None:
         customers = data_store.load_customers()
 
@@ -154,7 +196,7 @@ def generate_all(customers=None):
     if processed_ids:
         print(f"⏳ Resuming generation. {len(processed_ids)} customer(s) already processed.")
 
-    drafts = []
+    new_count = 0
     try:
         for customer in customers:
             customer_id = customer.get("id") or customer.get("customer_id")
@@ -163,34 +205,31 @@ def generate_all(customers=None):
             if customer_id in processed_ids:
                 print(f"⏭️  Skipping {customer.get('name')} ({customer_id}) — already generated.")
                 continue
+            if _is_skipped_customer(customer):
+                print(f"🚫 Skipping {customer.get('name')} ({customer_id}) — marked with #.")
+                processed_ids.add(customer_id)
+                data_store.save_generation_state(processed_ids)
+                continue
 
             print(f"Generating draft for {customer.get('name')} at {customer.get('company')}...")
             try:
-                draft = generate_for_customer(customer)
-                drafts.append(draft)
+                generate_for_customer(customer)
                 processed_ids.add(customer_id)
                 data_store.save_generation_state(processed_ids)
+                new_count += 1
             except Exception as e:
                 print(f"❌ Failed to generate draft for {customer_id}: {e}")
     except KeyboardInterrupt:
         print("\n⏸️  Generation paused by user.")
 
-    # Merge with existing drafts to avoid overwriting approved/edited drafts
-    existing = data_store.load_drafts()
-    existing_ids = {d.get("draft_id") for d in existing}
-    merged = [d for d in existing if d.get("draft_id") in existing_ids]
-    for draft in drafts:
-        if draft["draft_id"] not in existing_ids:
-            merged.append(draft)
-
-    data_store.save_drafts(merged)
     total_customers = len([c for c in customers if (c.get("id") or c.get("customer_id"))])
-    print(f"✅ Saved {len(drafts)} new draft(s). Total drafts: {len(merged)}")
+    all_drafts = data_store.load_drafts()
+    print(f"✅ Saved {new_count} new draft(s). Total drafts: {len(all_drafts)}")
     if processed_ids and len(processed_ids) >= total_customers:
         data_store.clear_generation_state()
     else:
         print("💡 Tip: Run option 1 again to resume from where you left off.")
-    return drafts
+    return all_drafts
 
 
 if __name__ == "__main__":
