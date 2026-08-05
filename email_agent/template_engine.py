@@ -115,11 +115,8 @@ def template_for_stage(stage):
     """
     Pick a default template name for a given sales stage.
 
-    Args:
-        stage: Sales stage string.
-
-    Returns:
-        Template name string.
+    Falls back to the 'other' template when the stage-specific template
+    does not exist, so that a generic template can still be used.
     """
     mapping = {
         "new_lead": "initial_contact",
@@ -127,4 +124,10 @@ def template_for_stage(stage):
         "follow_up_no_reply": "final_note",
         "replied": "follow_up",
     }
-    return mapping.get(stage, "initial_contact")
+    name = mapping.get(stage, "initial_contact")
+    existing = list_templates()
+    if name in existing:
+        return name
+    if "other" in existing:
+        return "other"
+    return name

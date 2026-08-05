@@ -47,7 +47,7 @@ AI_sales_email_agent/
 │   │   ├── follow_up/
 │   │   └── final_note/
 │   ├── import/             # 用户拖入的模板源文件（md/docx/pdf）
-│   ├── archive/            # 历史模板归档 YYYY/MM/DD/<name>/
+│   ├── archive/            # 历史模板归档 <template_name>/YYYY/MM/DD/<HHMMSS>/
 │   └── sender_profile.md   # 寄件人身份变量（新增）
 ├── assets/
 │   └── images/             # 模板内联图片
@@ -114,12 +114,17 @@ AI_sales_email_agent/
 │  template_importer.extract_to_markdown()                         │
 │        │ 输出：结构化 Markdown（段落、图片/链接占位）             │
 │        ▼                                                          │
+│  源模板选择（二选一）                                            │
+│    [L] 使用最新/基础模板：激活目录优先，否则取最新归档           │
+│    [B] 浏览历史归档：模板名 → 年 → 月 → 日 → 归档               │
+│        ▼                                                          │
 │  template_importer.merge_markdown_into_template()                │
 │        │ 保留 {{var}}、{{IMAGE:name}}、<img>、<a>                 │
 │        ▼                                                          │
 │  template_importer.generate_missing_language()（如需要）         │
 │        ▼                                                          │
 │  template_importer.archive_current_template()                    │
+│        │ 归档到 archive/<template_name>/YYYY/MM/DD/<HHMMSS>/   │
 │        ▼                                                          │
 │  preview.build_preview_html() → webbrowser                       │
 │        ▼                                                          │
@@ -307,7 +312,7 @@ def extract_to_markdown(path: str) -> dict: ...
 def merge_markdown_into_template(template_name: str, markdown: str, language: str) -> str: ...
 def generate_missing_language(template_name: str, source_lang: str, target_lang: str) -> str: ...
 def has_unfinished_work(template_name: str) -> tuple[bool, str]: ...
-def activate_template(template_name: str, force: bool = False) -> None: ...
+def activate_template(template_name: str, candidate_path: str, source_template_path: str | None = None, force: bool = False) -> dict: ...
 ```
 
 ### 6.6 `email_agent/preview.py`
@@ -383,7 +388,12 @@ def check_replies(dry_run: bool = False) -> list[dict]: ...
 7. **可中断性**：生成与发送均通过 JSON state 文件实现 pause/resume；延迟拆分为短 sleep。
 8. **浏览器预览**：标准库 `webbrowser` + 临时 HTML；无桌面环境时打印路径，不阻断流程。
 9. **客户跳过**：`name` 以 `#` 开头仅跳过生成/发送，不影响回复记录（回复按 `email_logs.csv` 匹配）。
-10. **文档边界**：不修改 `docs/PRD.md` 和 `docs/UserFlow.md`；`architecture.md`、README、CONFIG_GUIDE 属于本实现范畴。
+10. **中文文件名映射**：`.docx/.md/.pdf` 文件名按关键词映射到标准模板名 `initial_contact / follow_up / final_note / other`，文件名本身不作为终端变量或目录名。
+11. **归档层级**：归档目录为 `archive/<template_name>/YYYY/MM/DD/<HHMMSS>/`，同时兼容旧结构 `archive/YYYY/MM/DD/<name>_<HHMMSS>/`。
+12. **源模板选择**：导入时可从当前激活模板或历史归档中选择合并基准；无可用基准时直接从导入文件生成 baseline HTML。
+13. **导入状态过期重置**：当 `templates/email/` 为空但 `templates/import/` 仍有已记录文件时，允许清空 `template_import_state.json` 重新导入。
+14. **终端中文化**：所有菜单、提示、状态信息使用中文，快捷键保持英文/数字。
+15. **文档边界**：不修改 `docs/PRD.md` 和 `docs/UserFlow.md`；`architecture.md`、README、CONFIG_GUIDE 属于本实现范畴。
 
 ## 9. 验证策略
 

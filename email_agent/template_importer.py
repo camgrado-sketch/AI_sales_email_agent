@@ -40,14 +40,20 @@ def _normalize_template_name(name):
 
 
 def _template_name_from_filename(filename):
-    """Try to infer template name from filename; fallback to initial_contact."""
+    """Map a source filename to a standard template name.
+
+    Chinese filenames are mapped by keyword; any unmatched file falls back
+    to the 'other' category so the original filename never appears as a
+    terminal variable or directory name.
+    """
     base = os.path.splitext(filename)[0].lower()
-    for candidate in ("initial_contact", "follow_up", "final_note"):
-        if candidate in base:
-            return candidate
-    # Strip language suffixes
-    base = re.sub(r"_(cn|en|zh|eng|chinese|english)$", "", base)
-    return _normalize_template_name(base)
+    if any(k in base for k in ("开发信", "首封", "initial", "first")):
+        return "initial_contact"
+    if any(k in base for k in ("跟进", "follow", "reminder", "second")):
+        return "follow_up"
+    if any(k in base for k in ("最终", "final", "last", "收尾")):
+        return "final_note"
+    return "other"
 
 
 # ------------------------------------------------------------------------------
@@ -389,7 +395,7 @@ def generate_missing_language(template_name, source_lang, target_lang):
 # ------------------------------------------------------------------------------
 
 def archive_current_template(template_name):
-    """Copy the current active template directory to templates/archive/YYYY/MM/DD/."""
+    """Copy the current active template directory to templates/archive/<template_name>/YYYY/MM/DD/."""
     src = os.path.join(config.TEMPLATES_DIR, template_name)
     if not os.path.exists(src):
         return None
@@ -397,42 +403,137 @@ def archive_current_template(template_name):
     stamp = now.strftime("%H%M%S")
     dst = os.path.join(
         config.TEMPLATE_ARCHIVE_DIR,
+        template_name,
         now.strftime("%Y"),
         now.strftime("%m"),
         now.strftime("%d"),
-        f"{template_name}_{stamp}",
+        stamp,
     )
     shutil.copytree(src, dst)
     return dst
 
 
 def list_archive_folders():
-    """Return a flat list of archived template folders sorted newest first."""
+    """Return a flat list of archived template folders sorted newest first.
+
+    Supports both the current layout:
+        archive/<template_name>/YYYY/MM/DD/<stamp>/
+    and the legacy layout:
+        archive/YYYY/MM/DD/<template_name>_<stamp>/
+    """
     archives = []
     base = config.TEMPLATE_ARCHIVE_DIR
     if not os.path.exists(base):
         return archives
+
+    # New structure: archive/<template_name>/YYYY/MM/DD/<stamp>
+    for template_name in sorted(os.listdir(base), reverse=True):
+        tpath = os.path.join(base, template_name)
+        if not os.path.isdir(tpath) or template_name in (".gitkeep",):
+            continue
+        if re.match(r"^\d{4}$", template_name):
+            continue  # legacy top-level year
+        for year in sorted(os.listdir(tpath), reverse=True):
+            ypath = os.path.join(tpath, year)
+            if not os.path.isdir(ypath) or not re.match(r"^\d{4}$", year):
+                continue
+            for month in sorted(os.listdir(ypath), reverse=True):
+                mpath = os.path.join(ypath, month)
+                if not os.path.isdir(mpath) or not re.match(r"^\d{2}$", month):
+                    continue
+                for day in sorted(os.listdir(mpath), reverse=True):
+                    dpath = os.path.join(mpath, day)
+                    if not os.path.isdir(dpath) or not re.match(r"^\d{2}$", day):
+                        continue
+                    for stamp in sorted(os.listdir(dpath), reverse=True):
+                        epath = os.path.join(dpath, stamp)
+                        if os.path.isdir(epath) and re.match(r"^\d{6}$", stamp):
+                            archives.append({
+                                "path": epath,
+                                "date": f"{year}/{month}/{day}",
+                                "name": f"{template_name}/{year}/{month}/{day}/{stamp}",
+                                "template_name": template_name,
+                                "stamp": stamp,
+                            })
+
+    # Old structure: archive/YYYY/MM/DD/<name>_<stamp>
     for year in sorted(os.listdir(base), reverse=True):
         ypath = os.path.join(base, year)
-        if not os.path.isdir(ypath):
+        if not os.path.isdir(ypath) or not re.match(r"^\d{4}$", year):
             continue
         for month in sorted(os.listdir(ypath), reverse=True):
             mpath = os.path.join(ypath, month)
-            if not os.path.isdir(mpath):
+            if not os.path.isdir(mpath) or not re.match(r"^\d{2}$", month):
                 continue
             for day in sorted(os.listdir(mpath), reverse=True):
                 dpath = os.path.join(mpath, day)
-                if not os.path.isdir(dpath):
+                if not os.path.isdir(dpath) or not re.match(r"^\d{2}$", day):
                     continue
                 for name in sorted(os.listdir(dpath), reverse=True):
-                    entry_path = os.path.join(dpath, name)
-                    if os.path.isdir(entry_path):
-                        archives.append({
-                            "path": entry_path,
-                            "date": f"{year}/{month}/{day}",
-                            "name": name,
-                        })
+                    epath = os.path.join(dpath, name)
+                    if not os.path.isdir(epath):
+                        continue
+                    template_name, stamp = name, ""
+                    if "_" in name:
+                        parts = name.rsplit("_", 1)
+                        if parts[1].isdigit() and len(parts[1]) == 6:
+                            template_name, stamp = parts[0], parts[1]
+                    archives.append({
+                        "path": epath,
+                        "date": f"{year}/{month}/{day}",
+                        "name": name,
+                        "template_name": template_name,
+                        "stamp": stamp,
+                    })
+
+    archives.sort(key=lambda x: (x["date"].replace("/", ""), x["stamp"]), reverse=True)
     return archives
+
+
+def get_active_template_path(template_name):
+    """Return the active template directory path if it exists."""
+    path = os.path.join(config.TEMPLATES_DIR, template_name)
+    return path if os.path.exists(path) else None
+
+
+def get_latest_archive(template_name):
+    """Return the newest archive path for a template, or None."""
+    matches = [a for a in list_archive_folders() if a["template_name"] == template_name]
+    return matches[0]["path"] if matches else None
+
+
+def list_archives_by_day(template_name):
+    """Return [(date, [archive_dict, ...]), ...] sorted by date descending."""
+    matches = [a for a in list_archive_folders() if a["template_name"] == template_name]
+    days = {}
+    for a in matches:
+        days.setdefault(a["date"], []).append(a)
+    return sorted(days.items(), key=lambda x: x[0].replace("/", ""), reverse=True)
+
+
+def list_template_names_in_archive():
+    """Return sorted list of template names that have archives."""
+    return sorted({a["template_name"] for a in list_archive_folders()})
+
+
+def is_import_state_stale():
+    """Return True when templates/email/ is empty but templates/import/ still
+    contains files already recorded in template_import_state.json."""
+    if template_engine.list_templates():
+        return False
+    candidates = scan_import_folder()
+    if not candidates:
+        return False
+    state = data_store.load_template_import_state()
+    return bool(state.get("files"))
+
+
+def reset_import_state():
+    """Clear the checksum state so existing import files appear as new."""
+    data_store.save_template_import_state({
+        "last_reset_at": datetime.now().isoformat(),
+        "files": {},
+    })
 
 
 def delete_archive_entry(path):
@@ -466,16 +567,17 @@ def has_unfinished_work(template_name=None):
     return False, ""
 
 
-def activate_template(template_name, candidate_path, force=False):
+def activate_template(template_name, candidate_path, source_template_path=None, force=False):
     """
     Import a candidate file into an active template directory.
 
     Steps:
       1. Archive current template.
-      2. Extract candidate to Markdown.
-      3. Merge Markdown into template.html (source language).
-      4. Generate the missing language variant if needed.
-      5. Mark template as unconfirmed (user must confirm before use).
+      2. If a source_template_path is provided, seed the target directory from it.
+      3. Extract candidate to Markdown.
+      4. Merge Markdown into template.html (source language).
+      5. Generate the missing language variant if needed.
+      6. Mark template as unconfirmed (user must confirm before use).
     """
     if not force:
         has_work, reason = has_unfinished_work(template_name)
@@ -493,6 +595,25 @@ def activate_template(template_name, candidate_path, force=False):
 
     target_dir = os.path.join(config.TEMPLATES_DIR, template_name)
     os.makedirs(target_dir, exist_ok=True)
+
+    # If a source template is chosen, seed the target directory from it.
+    if source_template_path and os.path.isdir(source_template_path):
+        active_path = get_active_template_path(template_name)
+        if source_template_path != active_path:
+            # Clean target first to avoid mixed leftovers
+            for item in os.listdir(target_dir):
+                item_path = os.path.join(target_dir, item)
+                if os.path.isdir(item_path):
+                    shutil.rmtree(item_path)
+                else:
+                    os.remove(item_path)
+            for item in os.listdir(source_template_path):
+                s = os.path.join(source_template_path, item)
+                d = os.path.join(target_dir, item)
+                if os.path.isdir(s):
+                    shutil.copytree(s, d)
+                else:
+                    shutil.copy2(s, d)
 
     # Ensure a config.yaml exists for new templates
     config_path = os.path.join(target_dir, "config.yaml")
