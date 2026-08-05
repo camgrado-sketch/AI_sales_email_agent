@@ -78,6 +78,7 @@ PROMPTS_DIR = os.path.join(BASE_DIR, "prompts")
 SKILLS_DIR = os.path.join(BASE_DIR, "skills")
 
 EMAIL_GENERATION_PROMPT_FILE = os.path.join(PROMPTS_DIR, "email_generation_prompt.md")
+TEMPLATE_IMPORT_PROMPT_FILE = os.path.join(PROMPTS_DIR, "template_import_prompt.md")
 EMAIL_WRITING_SKILL_FILE = os.path.join(SKILLS_DIR, "email_writing_skill.md")
 EMAIL_WRITING_SKILL_CONCISE_FILE = os.path.join(SKILLS_DIR, "email_writing_skill_concise.md")
 

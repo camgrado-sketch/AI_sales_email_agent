@@ -7,8 +7,6 @@ import shutil
 from datetime import datetime
 from typing import Optional
 
-from bs4 import BeautifulSoup
-
 from email_agent import config, data_store, llm_client, template_engine
 
 
@@ -192,202 +190,189 @@ def detect_language(markdown, filename=""):
 
 
 # ------------------------------------------------------------------------------
-# Markdown -> HTML template merge
+# LLM-based template structuring
 # ------------------------------------------------------------------------------
 
-def _strip_markdown(text):
-    """Convert Markdown inline syntax to plain text."""
-    text = re.sub(r"#{1,6}\s+", "", text)
-    text = re.sub(r"\*\*(.+?)\*\*", r"\1", text)
-    text = re.sub(r"__(.+?)__", r"\1", text)
-    text = re.sub(r"\*(.+?)\*", r"\1", text)
-    text = re.sub(r"_(.+?)_", r"\1", text)
-    text = re.sub(r"`(.+?)`", r"\1", text)
-    text = re.sub(r"!\[([^\]]*)\]\([^)]+\)", r"[image: \1]", text)
-    text = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", text)
-    return text.strip()
+def _available_variable_names():
+    """Return the canonical list of variable placeholders the LLM may use."""
+    return [
+        "SENDER_NAME",
+        "SENDER_TITLE",
+        "SENDER_COMPANY",
+        "SENDER_EMAIL",
+        "SENDER_PHONE",
+        "SENDER_MARKET_REGION",
+        "CUSTOMER_FIRST_NAME",
+        "CUSTOMER_NAME",
+        "CUSTOMER_COMPANY",
+        "CUSTOMER_POSITION",
+        "CUSTOMER_LOCATION",
+        "CUSTOMER_INDUSTRY",
+        "CURRENT_DATE",
+    ]
 
 
-def _editable_text_nodes(soup):
-    """Yield text nodes in the body that are safe to overwrite."""
-    body = soup.body or soup
-    for elem in body.find_all(string=True):
-        parent = elem.parent
-        if parent and parent.name in ("style", "script"):
-            continue
-        text = str(elem)
-        if "{{" in text and "}}" in text:
-            continue
-        if parent and parent.name in ("img", "a"):
-            continue
-        if not elem.strip():
-            continue
-        yield elem
-
-
-def _markdown_to_baseline_html(markdown):
-    """Create a minimal HTML document from extracted Markdown text.
-
-    Used when importing into a brand-new template that has no existing
-    template.html. Headings become h1/h2 tags; everything else becomes
-    paragraphs. Inline Markdown is stripped and HTML-escaped for safety.
-    """
-    lines = markdown.splitlines()
-    blocks = []
-    current = []
-    for line in lines:
-        if line.strip():
-            current.append(line)
-        else:
-            if current:
-                blocks.append(current)
-                current = []
-    if current:
-        blocks.append(current)
-
-    parts = []
-    for block in blocks:
-        # If the whole block is headings, emit real heading tags.
-        if all(re.match(r"^#{1,6}\s+", line.strip()) for line in block):
-            for line in block:
-                m = re.match(r"^(#{1,6})\s+(.*)$", line.strip())
-                if not m:
-                    continue
-                level = len(m.group(1))
-                text = html.escape(_strip_markdown(m.group(2)).strip())
-                if text:
-                    parts.append(f"<h{level}>{text}</h{level}>")
-            continue
-
-        # Otherwise treat the block as a paragraph.
-        text = " ".join(line.strip() for line in block)
-        text = html.escape(_strip_markdown(text).strip())
-        if text:
-            parts.append(f"<p>{text}</p>")
-
-    body = "\n".join(f"    {line}" for line in parts)
-    return f"""<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <title>Imported Template</title>
-    <style>
-        body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; max-width: 760px; margin: 40px auto; padding: 20px; line-height: 1.6; }}
-    </style>
-</head>
-<body>
-{body}
-</body>
-</html>"""
-
-
-def merge_markdown_into_template(template_name, markdown, language=None):
-    """Merge plain-text blocks from markdown into template.html.
-
-    If template.html does not exist yet (brand-new template or a previous
-    failed import left only config.yaml), create a baseline HTML document from
-    the markdown instead of raising an error.
-    """
-    template_path = template_engine.get_template_path(template_name)
-    if not os.path.exists(template_path):
-        return _markdown_to_baseline_html(markdown)
-
-    with open(template_path, "r", encoding="utf-8") as f:
-        html = f.read()
-
-    soup = BeautifulSoup(html, "html.parser")
-    nodes = list(_editable_text_nodes(soup))
-
-    # Split markdown into paragraphs; preserve headings as strong-ish blocks
-    blocks = []
-    for block in re.split(r"\n\s*\n", markdown.strip()):
-        block = block.strip()
-        if not block:
-            continue
-        # Convert heading lines to bold text
-        lines = []
-        for line in block.splitlines():
-            m = re.match(r"^(#{1,6})\s+(.+)$", line.strip())
-            if m:
-                lines.append(f"**{m.group(2)}**")
-            else:
-                lines.append(line)
-        blocks.append(_strip_markdown(" ".join(lines)))
-
-    # Replace nodes in order
-    for i, node in enumerate(nodes):
-        if i >= len(blocks):
-            break
-        new_text = blocks[i]
-        if new_text:
-            node.replace_with(new_text)
-
-    # Append remaining blocks as new paragraphs at the end of body
-    if len(blocks) > len(nodes):
-        body = soup.body or soup
-        for block in blocks[len(nodes):]:
-            p = soup.new_tag("p")
-            p.string = block
-            body.append(p)
-
-    return str(soup)
-
-
-# ------------------------------------------------------------------------------
-# Bilingual generation
-# ------------------------------------------------------------------------------
-
-def generate_missing_language(template_name, source_lang, target_lang):
-    """Translate the current template.html into the target language."""
-    template_path = template_engine.get_template_path(template_name)
-    with open(template_path, "r", encoding="utf-8") as f:
-        html = f.read()
-
-    # Extract text nodes, translate them, then re-inject
-    soup = BeautifulSoup(html, "html.parser")
-    nodes = [n for n in _editable_text_nodes(soup) if n.strip()]
-
-    texts = [str(n) for n in nodes]
-    if not texts:
-        translated = []
-    else:
-        system_prompt = (
-            "You are a professional translator. Translate the following text segments "
-            f"from {'Chinese' if source_lang == 'cn' else 'English'} to "
-            f"{'Chinese' if target_lang == 'cn' else 'English'}. "
-            "Preserve the number of segments and return them as a JSON array of strings. "
-            "Do not add explanations."
-        )
-        user_prompt = "\n---SEGMENT---\n".join(texts)
-        schema = {
-            "name": "translations",
-            "type": "object",
-            "properties": {
-                "translations": {
-                    "type": "array",
-                    "items": {"type": "string"},
-                }
+def _template_structure_schema():
+    return {
+        "name": "structured_email_template",
+        "type": "object",
+        "properties": {
+            "subject_template": {
+                "type": "string",
+                "description": "Email subject line with {{VAR}} placeholders",
             },
-            "required": ["translations"],
-            "additionalProperties": False,
-        }
-        try:
-            result = llm_client.complete_json(system_prompt, user_prompt, schema)
-            translated = json.loads(result["content"]).get("translations", [])
-        except Exception:
-            translated = []
+            "cn_html": {
+                "type": "string",
+                "description": "Complete Chinese HTML email body with {{VAR}}, {{IMAGE:name}}, {{FILE:name}} placeholders",
+            },
+            "en_html": {
+                "type": "string",
+                "description": "Complete English HTML email body with placeholders",
+            },
+            "variables": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "List of variable names actually used in the templates",
+            },
+            "images": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "List of image placeholder names",
+            },
+            "files": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "List of file placeholder names",
+            },
+            "ignored_sections": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "Sections that were ignored as non-core content",
+            },
+        },
+        "required": ["subject_template", "cn_html", "en_html", "variables", "images", "files"],
+        "additionalProperties": False,
+    }
 
-    for i, node in enumerate(nodes):
-        if i < len(translated) and translated[i]:
-            node.replace_with(translated[i])
 
-    target_path = os.path.join(
-        config.TEMPLATES_DIR, template_name, f"template_{target_lang}.html"
+def structure_template_with_llm(markdown, filename=""):
+    """Call the remote LLM once to turn extracted Markdown into a structured bilingual template.
+
+    The LLM receives only text and placeholder names; no image or file binaries are uploaded.
+    """
+    if not config.get_active_model():
+        raise RuntimeError("No active LLM model configured. Check .env or settings.")
+
+    system_prompt = _read_file(config.TEMPLATE_IMPORT_PROMPT_FILE)
+    if not system_prompt:
+        raise RuntimeError(f"Template import prompt not found: {config.TEMPLATE_IMPORT_PROMPT_FILE}")
+
+    user_prompt = f"""Source filename: {filename}
+
+Available variables (use only these exact names):
+{', '.join(_available_variable_names())}
+
+---
+
+Extracted content:
+
+{markdown}
+"""
+
+    raw = llm_client.complete_json(
+        system_prompt,
+        user_prompt,
+        _template_structure_schema(),
+        temperature=0.3,
     )
-    os.makedirs(os.path.dirname(target_path), exist_ok=True)
-    with open(target_path, "w", encoding="utf-8") as f:
-        f.write(str(soup))
-    return target_path
+    result = json.loads(raw["content"])
+
+    # Normalize arrays to strings and strip whitespace
+    for key in ("subject_template", "cn_html", "en_html"):
+        if key in result:
+            result[key] = str(result[key]).strip()
+    for key in ("variables", "images", "files", "ignored_sections"):
+        value = result.get(key)
+        if not isinstance(value, list):
+            result[key] = []
+        else:
+            result[key] = [str(v).strip() for v in value if str(v).strip()]
+
+    return result
+
+
+# ------------------------------------------------------------------------------
+# Write structured template to disk
+# ------------------------------------------------------------------------------
+
+def _default_config_yaml(template_name, structured):
+    """Build a default config.yaml content from the structured template."""
+    variables = structured.get("variables", [])
+    images = structured.get("images", [])
+    files = structured.get("files", [])
+
+    lines = [
+        f"template_name: {template_name}",
+        "purpose: Auto-imported template",
+        "customer_type: all",
+        "recommended_stage: new_lead",
+        "variables:",
+    ]
+    for v in variables:
+        lines.append(f"  - {v}")
+    lines.append("images:")
+    for img in images:
+        lines.append(f"  - {img}")
+    lines.append("files:")
+    for f in files:
+        lines.append(f"  - {f}")
+    lines.extend([
+        "rules:",
+        "  - Use only facts from the customer record and confirmed sender profile.",
+        "  - Do not invent names, companies, positions, or locations.",
+        "  - The email language is determined by the language parameter at render time.",
+    ])
+    return "\n".join(lines) + "\n"
+
+
+def write_structured_template(template_name, structured, source_lang):
+    """Write the bilingual template files and config.yaml to the active template directory.
+
+    Args:
+        template_name: target template directory name.
+        structured: dict returned by structure_template_with_llm().
+        source_lang: "cn" or "en" — determines which version becomes template.html.
+
+    Returns:
+        dict with paths: main_path, other_path, config_path, source_language, target_language.
+    """
+    target_lang = "en" if source_lang == "cn" else "cn"
+    source_html_key = "cn_html" if source_lang == "cn" else "en_html"
+    target_html_key = "en_html" if source_lang == "cn" else "cn_html"
+
+    target_dir = os.path.join(config.TEMPLATES_DIR, template_name)
+    os.makedirs(target_dir, exist_ok=True)
+
+    main_path = os.path.join(target_dir, "template.html")
+    other_path = os.path.join(target_dir, f"template_{target_lang}.html")
+    config_path = os.path.join(target_dir, "config.yaml")
+
+    with open(main_path, "w", encoding="utf-8") as f:
+        f.write(structured.get(source_html_key, ""))
+
+    with open(other_path, "w", encoding="utf-8") as f:
+        f.write(structured.get(target_html_key, ""))
+
+    with open(config_path, "w", encoding="utf-8") as f:
+        f.write(_default_config_yaml(template_name, structured))
+
+    return {
+        "main_path": main_path,
+        "other_path": other_path,
+        "config_path": config_path,
+        "source_language": source_lang,
+        "target_language": target_lang,
+    }
 
 
 # ------------------------------------------------------------------------------
@@ -568,16 +553,18 @@ def has_unfinished_work(template_name=None):
 
 
 def activate_template(template_name, candidate_path, source_template_path=None, force=False):
-    """
-    Import a candidate file into an active template directory.
+    """Import a candidate file into an active template directory.
 
     Steps:
       1. Archive current template.
-      2. If a source_template_path is provided, seed the target directory from it.
-      3. Extract candidate to Markdown.
-      4. Merge Markdown into template.html (source language).
-      5. Generate the missing language variant if needed.
-      6. Mark template as unconfirmed (user must confirm before use).
+      2. Extract candidate to Markdown and detect source language.
+      3. Call the LLM once to obtain a structured bilingual template.
+      4. Write template.html (source language), template_<other>.html, and config.yaml.
+      5. Mark template as unconfirmed (user must confirm before use).
+
+    Note:
+      source_template_path is accepted for CLI compatibility but is no longer used to
+      merge HTML content; the new template is generated entirely from the LLM output.
     """
     if not force:
         has_work, reason = has_unfinished_work(template_name)
@@ -593,44 +580,12 @@ def activate_template(template_name, candidate_path, source_template_path=None, 
     markdown = extract_to_markdown(candidate_path)
     source_lang = detect_language(markdown, os.path.basename(candidate_path))
 
-    target_dir = os.path.join(config.TEMPLATES_DIR, template_name)
-    os.makedirs(target_dir, exist_ok=True)
+    # The source_template_path argument is kept for CLI compatibility but ignored;
+    # the new template is produced entirely by the LLM structured output.
+    _ = source_template_path
 
-    # If a source template is chosen, seed the target directory from it.
-    if source_template_path and os.path.isdir(source_template_path):
-        active_path = get_active_template_path(template_name)
-        if source_template_path != active_path:
-            # Clean target first to avoid mixed leftovers
-            for item in os.listdir(target_dir):
-                item_path = os.path.join(target_dir, item)
-                if os.path.isdir(item_path):
-                    shutil.rmtree(item_path)
-                else:
-                    os.remove(item_path)
-            for item in os.listdir(source_template_path):
-                s = os.path.join(source_template_path, item)
-                d = os.path.join(target_dir, item)
-                if os.path.isdir(s):
-                    shutil.copytree(s, d)
-                else:
-                    shutil.copy2(s, d)
-
-    # Ensure a config.yaml exists for new templates
-    config_path = os.path.join(target_dir, "config.yaml")
-    if not os.path.exists(config_path):
-        _write_default_config(config_path, template_name)
-
-    merged_html = merge_markdown_into_template(template_name, markdown, language=source_lang)
-    main_path = os.path.join(target_dir, "template.html")
-    with open(main_path, "w", encoding="utf-8") as f:
-        f.write(merged_html)
-
-    # Generate missing language variant
-    target_lang = "en" if source_lang == "cn" else "cn"
-    try:
-        generate_missing_language(template_name, source_lang, target_lang)
-    except Exception as e:
-        print(f"⚠️ Could not generate {target_lang} variant: {e}")
+    structured = structure_template_with_llm(markdown, os.path.basename(candidate_path))
+    written = write_structured_template(template_name, structured, source_lang)
 
     # Mark as unconfirmed so the user has to review before generation
     settings = data_store.load_settings()
@@ -642,36 +597,20 @@ def activate_template(template_name, candidate_path, source_template_path=None, 
         "template_name": template_name,
         "source_language": source_lang,
         "archive_path": archive_path,
-        "main_path": main_path,
+        "main_path": written["main_path"],
+        "other_path": written["other_path"],
+        "config_path": written["config_path"],
     }
-
-
-def _write_default_config(path, template_name):
-    default = f"""template_name: {template_name}
-purpose: Auto-imported template
-customer_type: all
-recommended_stage: new_lead
-variables:
-  - customer_first_name
-  - sender_name
-  - sender_title
-  - market_region
-  - company_name
-  - specific_project_or_detail
-  - pain_point_solution
-  - credible_proof
-images: []
-rules:
-  - Use only facts from the customer record and confirmed template.
-  - Maintain a neutral, professional tone.
-"""
-    with open(path, "w", encoding="utf-8") as f:
-        f.write(default)
 
 
 # ------------------------------------------------------------------------------
 # Preview
 # ------------------------------------------------------------------------------
+
+def _read_file(path):
+    with open(path, "r", encoding="utf-8") as f:
+        return f.read()
+
 
 def build_preview_html(template_name):
     """Build a self-contained preview HTML for the active template."""
@@ -682,7 +621,7 @@ def build_preview_html(template_name):
         with open(template_path, "r", encoding="utf-8") as f:
             html = f.read()
 
-    # Highlight variables and image placeholders
+    # Highlight variables and image/file placeholders
     html = re.sub(
         r"\{\{([^{}:]+)\}\}",
         r'<span style="background:#fff3cd;padding:0 4px;border-radius:3px;">{{\1}}</span>',
@@ -692,6 +631,12 @@ def build_preview_html(template_name):
         r"\{\{IMAGE:([^}]+)\}\}",
         r'<div style="background:#f8d7da;padding:8px;margin:8px 0;text-align:center;border-radius:4px;">'
         r'📷 Image placeholder: \1</div>',
+        html,
+    )
+    html = re.sub(
+        r"\{\{FILE:([^}]+)\}\}",
+        r'<div style="background:#d1ecf1;padding:8px;margin:8px 0;text-align:center;border-radius:4px;">'
+        r'📎 File placeholder: \1</div>',
         html,
     )
 
