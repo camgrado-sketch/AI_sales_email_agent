@@ -35,8 +35,27 @@ def _wait_for_enter():
     input("\nPress Enter to return to the menu...")
 
 
+def _active_templates_exist():
+    return bool(template_engine.list_templates())
+
+
+def _prompt_with_hint(prompt, hint=""):
+    """Print a hint line immediately above an input prompt."""
+    if hint:
+        print(f"\n{hint}")
+    return input(prompt).strip()
+
+
 def _require_confirmed_template():
-    if not config.is_template_confirmed():
+    confirmed = config.is_template_confirmed()
+    if confirmed and not _active_templates_exist():
+        print("⚠️ Template confirmation flag is set but no active templates found. Resetting confirmation.")
+        settings = data_store.load_settings()
+        settings["template_confirmed"] = False
+        settings["template_confirmed_at"] = None
+        data_store.save_settings(settings)
+        confirmed = False
+    if not confirmed:
         print("❌ No template confirmed. Please go to menu 8 to import/confirm a template first.")
         return False
     return True
@@ -47,7 +66,10 @@ def menu_generate():
     if not _require_confirmed_template():
         return
     print("This will analyze customers and generate personalized email drafts.")
-    confirm = input("Proceed? (Y/n): ").strip().lower()
+    confirm = _prompt_with_hint(
+        "Proceed? (Y/n): ",
+        "[Y] Start generation  [n] Cancel"
+    ).strip().lower()
     if confirm and confirm not in ("y", "yes"):
         print("Cancelled.")
         return
@@ -85,7 +107,10 @@ def menu_review():
             print(f"⚠️ Could not open browser preview: {e}")
 
         while True:
-            choice = input("[Y] Approve  [N] Reject  [S] Skip  [E] Edit  [Q] Quit review: ").strip().lower()
+            choice = _prompt_with_hint(
+                "Your choice: ",
+                "[Y] Approve  [N] Reject  [S] Skip  [E] Edit  [Q] Quit review"
+            ).strip().lower()
             if choice in ("y", "yes"):
                 data_store.update_draft_status(draft.get("draft_id"), "approved")
                 print("Approved.")
@@ -140,7 +165,10 @@ def menu_check_replies():
             print(f"⚠️ Could not open browser preview: {e}")
 
         while True:
-            choice = input("[S] Save replies to log  [R] Refresh  [Q] Quit: ").strip().lower()
+            choice = _prompt_with_hint(
+                "Your choice: ",
+                "[S] Save replies to log  [R] Refresh  [Q] Quit"
+            ).strip().lower()
             if choice in ("s", "save"):
                 check_replies(dry_run=False)
                 print("✅ Replies saved to reply_logs.csv.")
@@ -211,7 +239,10 @@ def menu_switch_model():
         marker = " *" if i == config._active_model_index() else "  "
         print(f"{marker}[{i}] {m.get('name')} ({m.get('model')})")
 
-    choice = input(f"Select model (0-{len(models)-1}) or press Enter to keep: ").strip()
+    choice = _prompt_with_hint(
+        f"Select model (0-{len(models)-1}) or press Enter to keep: ",
+        "Enter a model number or press Enter to keep the current model"
+    )
     if not choice:
         print("No change.")
         return
@@ -230,8 +261,8 @@ def menu_switch_model():
     print(f"✅ Active model switched to [{idx}] {models[idx].get('name')}.")
 
 
-def menu_import_template():
-    print("\n[Import / Confirm Template]")
+def _import_template_flow():
+    """Import a new template file from templates/import/."""
     try:
         changes = template_importer.detect_changes()
     except Exception as e:
@@ -240,64 +271,66 @@ def menu_import_template():
 
     if not changes:
         print("No new template files detected in templates/import/.")
-        print("\nCurrent templates:")
-        for name in template_engine.list_templates():
-            langs = template_engine.list_template_languages(name)
-            print(f"  - {name}: {', '.join(langs)}")
+        return
 
-        if config.is_template_confirmed():
-            print("\nTemplate is already confirmed.")
-            reset = input("Reset confirmation and require re-confirmation? (y/N): ").strip().lower()
-            if reset == "y":
-                settings = data_store.load_settings()
-                settings["template_confirmed"] = False
-                data_store.save_settings(settings)
-                print("Confirmation reset. Please review and confirm below.")
-            else:
-                return
-    else:
-        print(f"Found {len(changes)} new/updated file(s):")
-        for i, cand in enumerate(changes, start=1):
-            print(f"  [{i}] {cand.filename}")
+    print(f"Found {len(changes)} new/updated file(s):")
+    for i, cand in enumerate(changes, start=1):
+        print(f"  [{i}] {cand.filename}")
 
-        choice = input("Select file number to import (or 0 to cancel): ").strip()
-        if choice == "0":
+    choice = _prompt_with_hint(
+        "Select file number (or 0 to cancel): ",
+        "Enter the number of the file you want to import"
+    ).strip()
+    if choice == "0":
+        print("Cancelled.")
+        return
+    try:
+        idx = int(choice) - 1
+        if idx < 0 or idx >= len(changes):
+            print("Invalid selection.")
+            return
+    except ValueError:
+        print("Invalid input.")
+        return
+
+    candidate = changes[idx]
+    default_name = template_importer._template_name_from_filename(candidate.filename)
+    print(f"Inferred template name: {default_name}")
+    name_input = input("Enter template name to import into (or press Enter to use inferred): ").strip()
+    template_name = name_input or default_name
+
+    has_work, reason = template_importer.has_unfinished_work(template_name)
+    if has_work:
+        print(f"\n⚠️ Warning: current template has unfinished work: {reason}")
+        force = _prompt_with_hint(
+            "Continue? (y/N): ",
+            "Importing will archive the current template"
+        ).strip().lower()
+        if force != "y":
             print("Cancelled.")
             return
-        try:
-            idx = int(choice) - 1
-            if idx < 0 or idx >= len(changes):
-                print("Invalid selection.")
-                return
-        except ValueError:
-            print("Invalid input.")
-            return
 
-        candidate = changes[idx]
-        default_name = template_importer._template_name_from_filename(candidate.filename)
-        print(f"Inferred template name: {default_name}")
-        name_input = input("Enter template name to import into (or press Enter to use inferred): ").strip()
-        template_name = name_input or default_name
+    try:
+        result = template_importer.activate_template(template_name, candidate.path, force=True)
+        print(f"✅ Imported as '{result['template_name']}' ({result['source_language']}).")
+        print(f"   Archived old template to: {result['archive_path']}")
+        template_importer.save_import_state()
+    except Exception as e:
+        print(f"❌ Import failed: {e}")
+        return
 
-        has_work, reason = template_importer.has_unfinished_work(template_name)
-        if has_work:
-            print(f"\n⚠️ Warning: current template has unfinished work: {reason}")
-            force = input("Importing will archive the current template. Continue? (y/N): ").strip().lower()
-            if force != "y":
-                print("Cancelled.")
-                return
+    # Preview and confirm immediately after import
+    _confirm_template_flow()
 
-        try:
-            result = template_importer.activate_template(template_name, candidate.path, force=True)
-            print(f"✅ Imported as '{result['template_name']}' ({result['source_language']}).")
-            print(f"   Archived old template to: {result['archive_path']}")
-            template_importer.save_import_state()
-        except Exception as e:
-            print(f"❌ Import failed: {e}")
-            return
 
-    # Preview and confirm
-    for name in template_engine.list_templates():
+def _confirm_template_flow():
+    """Preview active templates and confirm/reset the confirmation flag."""
+    templates = template_engine.list_templates()
+    if not templates:
+        print("No active templates to confirm. Please import a template first.")
+        return
+
+    for name in templates:
         try:
             preview_html = template_importer.build_preview_html(name)
             from email_agent.preview import _open_html
@@ -307,14 +340,123 @@ def menu_import_template():
             print(f"⚠️ Could not open preview for '{name}': {e}")
 
     if config.is_template_confirmed():
-        print("\nTemplate already confirmed.")
-    else:
-        confirm = input("Confirm this template for generation/sending? (Y/n): ").strip().lower()
-        if confirm in ("y", "yes"):
-            template_importer.confirm_active_template()
-            print("✅ Template confirmed.")
+        reset = _prompt_with_hint(
+            "Reset confirmation and require re-confirmation? (y/N): ",
+            "[y] Reset confirmation  [Enter/N] Keep current confirmation"
+        ).strip().lower()
+        if reset == "y":
+            settings = data_store.load_settings()
+            settings["template_confirmed"] = False
+            settings["template_confirmed_at"] = None
+            data_store.save_settings(settings)
+            print("Confirmation reset. Please review and confirm below.")
         else:
-            print("Template remains unconfirmed. Generation and sending are blocked.")
+            return
+
+    confirm = _prompt_with_hint(
+        "Confirm this template for generation/sending? (Y/n): ",
+        "[Y] Confirm  [n] Leave unconfirmed"
+    ).strip().lower()
+    if confirm in ("y", "yes"):
+        template_importer.confirm_active_template()
+        print("✅ Template confirmed.")
+    else:
+        print("Template remains unconfirmed. Generation and sending are blocked.")
+
+
+def menu_manage_archives():
+    """List and delete archived templates organized by YYYY/MM/DD."""
+    print("\n[Manage Template Archives]")
+    archives = template_importer.list_archive_folders()
+    if not archives:
+        print("No archived templates found.")
+        return
+
+    print(f"Found {len(archives)} archive(s):\n")
+    for i, entry in enumerate(archives, start=1):
+        print(f"  [{i}] {entry['date']} - {entry['name']}")
+
+    choice = _prompt_with_hint(
+        'Enter number to delete, "all" to clear everything, or 0 to cancel: ',
+        'Enter a number, "all", or 0'
+    ).strip()
+    if choice == "0":
+        print("Cancelled.")
+        return
+
+    if choice.lower() == "all":
+        confirm = _prompt_with_hint(
+            "Confirm delete ALL archives? (Y/n): ",
+            "[Y] Delete all archives  [n] Cancel"
+        ).strip().lower()
+        if confirm in ("y", "yes"):
+            for entry in archives:
+                template_importer.delete_archive_entry(entry["path"])
+            print("✅ All archives deleted.")
+        else:
+            print("Cancelled.")
+        return
+
+    try:
+        idx = int(choice)
+        if idx < 1 or idx > len(archives):
+            print("Invalid number.")
+            return
+    except ValueError:
+        print("Invalid input.")
+        return
+
+    target = archives[idx - 1]
+    confirm = _prompt_with_hint(
+        f"Confirm delete archive #{idx} ({target['date']} - {target['name']})? (Y/n): ",
+        "[Y] Delete this archive  [n] Cancel"
+    ).strip().lower()
+    if confirm in ("y", "yes"):
+        template_importer.delete_archive_entry(target["path"])
+        print("✅ Archive deleted.")
+    else:
+        print("Cancelled.")
+
+
+def menu_import_template():
+    print("\n[Import / Confirm Template]")
+    while True:
+        templates = template_engine.list_templates()
+        print("\nCurrent active templates:")
+        if templates:
+            for name in templates:
+                langs = template_engine.list_template_languages(name)
+                print(f"  - {name}: {', '.join(langs)}")
+        else:
+            print("  (none)")
+
+        confirmed = config.is_template_confirmed()
+        print(f"\nTemplate confirmed: {'Yes' if confirmed else 'No'}")
+
+        if confirmed and not templates:
+            print("⚠️ Template confirmed but no active templates found. Resetting confirmation.")
+            settings = data_store.load_settings()
+            settings["template_confirmed"] = False
+            settings["template_confirmed_at"] = None
+            data_store.save_settings(settings)
+            confirmed = False
+
+        choice = _prompt_with_hint(
+            "Select option: ",
+            "[I] Import new file  [M] Manage archives  [C] Confirm/reset  [Q] Quit"
+        ).strip().lower()
+
+        if choice in ("i", "import"):
+            _import_template_flow()
+        elif choice in ("m", "manage"):
+            menu_manage_archives()
+        elif choice in ("c", "confirm"):
+            _confirm_template_flow()
+        elif choice in ("q", "quit"):
+            print("Returning to main menu.")
+            break
+        else:
+            print("Invalid choice.")
 
 
 def menu_toggle_skill():
@@ -322,7 +464,10 @@ def menu_toggle_skill():
     print(f"Current mode: {config.SKILL_MODE}")
     print("  full    - Use the complete email_writing_skill.md (slower, more detailed)")
     print("  concise - Use the concise version (faster, ~50 lines)")
-    new_mode = input("Enter mode (full/concise) or press Enter to keep current: ").strip().lower()
+    new_mode = _prompt_with_hint(
+        "Enter mode (full/concise) or press Enter to keep current: ",
+        "[full] Complete skill  [concise] Concise skill  [Enter] Keep current"
+    ).strip().lower()
     if not new_mode:
         print("No change.")
         return
@@ -349,13 +494,19 @@ def menu_delete_drafts():
         subject = draft.get("subject", "(no subject)")
         print(f"  [{i}] {name} - {subject}")
 
-    choice = input('\nEnter number to delete, "all" to clear everything, or 0 to cancel: ').strip()
+    choice = _prompt_with_hint(
+        '\nEnter number to delete, "all" to clear everything, or 0 to cancel: ',
+        'Enter a draft number, "all", or 0'
+    ).strip()
     if choice == "0":
         print("Cancelled.")
         return
 
     if choice.lower() == "all":
-        confirm = input("Confirm delete ALL drafts? (Y/n): ").strip().lower()
+        confirm = _prompt_with_hint(
+            "Confirm delete ALL drafts? (Y/n): ",
+            "[Y] Delete all drafts  [n] Cancel"
+        ).strip().lower()
         if confirm in ("y", "yes"):
             data_store.clear_drafts()
             data_store.clear_generation_state()
@@ -374,7 +525,10 @@ def menu_delete_drafts():
         return
 
     target = drafts[idx - 1]
-    confirm = input(f"Confirm delete draft #{idx} ({target.get('subject', '')})? (Y/n): ").strip().lower()
+    confirm = _prompt_with_hint(
+        f"Confirm delete draft #{idx} ({target.get('subject', '')})? (Y/n): ",
+        "[Y] Delete this draft  [n] Cancel"
+    ).strip().lower()
     if confirm in ("y", "yes"):
         data_store.delete_draft(target.get("draft_id"))
         print("✅ Draft deleted.")

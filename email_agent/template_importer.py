@@ -406,6 +406,43 @@ def archive_current_template(template_name):
     return dst
 
 
+def list_archive_folders():
+    """Return a flat list of archived template folders sorted newest first."""
+    archives = []
+    base = config.TEMPLATE_ARCHIVE_DIR
+    if not os.path.exists(base):
+        return archives
+    for year in sorted(os.listdir(base), reverse=True):
+        ypath = os.path.join(base, year)
+        if not os.path.isdir(ypath):
+            continue
+        for month in sorted(os.listdir(ypath), reverse=True):
+            mpath = os.path.join(ypath, month)
+            if not os.path.isdir(mpath):
+                continue
+            for day in sorted(os.listdir(mpath), reverse=True):
+                dpath = os.path.join(mpath, day)
+                if not os.path.isdir(dpath):
+                    continue
+                for name in sorted(os.listdir(dpath), reverse=True):
+                    entry_path = os.path.join(dpath, name)
+                    if os.path.isdir(entry_path):
+                        archives.append({
+                            "path": entry_path,
+                            "date": f"{year}/{month}/{day}",
+                            "name": name,
+                        })
+    return archives
+
+
+def delete_archive_entry(path):
+    """Remove an archived template folder tree."""
+    if os.path.exists(path):
+        shutil.rmtree(path)
+        return True
+    return False
+
+
 def has_unfinished_work(template_name=None):
     """Check whether the current template still has pending or unsent work."""
     reasons = []
@@ -518,8 +555,11 @@ rules:
 def build_preview_html(template_name):
     """Build a self-contained preview HTML for the active template."""
     template_path = template_engine.get_template_path(template_name)
-    with open(template_path, "r", encoding="utf-8") as f:
-        html = f.read()
+    if not os.path.exists(template_path):
+        html = f"<p><em>Template HTML not found for '{template_name}'.</em></p>"
+    else:
+        with open(template_path, "r", encoding="utf-8") as f:
+            html = f.read()
 
     # Highlight variables and image placeholders
     html = re.sub(
