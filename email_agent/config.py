@@ -240,6 +240,11 @@ def is_template_confirmed():
     return bool(_load_json(SETTINGS_JSON_FILE).get("template_confirmed", False))
 
 
+def get_selected_template():
+    """Return the user-selected active template name, or empty string if auto."""
+    return str(_load_json(SETTINGS_JSON_FILE).get("selected_template", "")).strip()
+
+
 # -----------------------------------------------------------------------------
 # Logging Headers
 # -----------------------------------------------------------------------------

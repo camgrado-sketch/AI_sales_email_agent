@@ -36,6 +36,7 @@ def _print_settings_menu():
     print("  [2] 切换当前模型")
     print("  [3] 切换 skill 模式")
     print("  [4] 配置检查")
+    print("  [5] 选择生效模板")
     print("  [0] 返回主菜单")
     print()
 
@@ -234,6 +235,8 @@ def menu_config():
     print(f"  区域：          {sender.get('sender_market_region')}")
     print(f"Skill 模式：      {config.SKILL_MODE}")
     print(f"模板已确认：      {config.is_template_confirmed()}")
+    selected = config.get_selected_template()
+    print(f"生效模板：        {selected if selected else '（按阶段自动选择）'}")
     print(f"Demo 模式：       {config.DEMO_MODE}")
     print(f"允许邮箱：        {config.ALLOWED_TEST_EMAILS}")
     print(f"日发送上限：      {config.MAX_DAILY_SENDS}")
@@ -300,6 +303,48 @@ def menu_toggle_skill():
     print(f"✅ Skill 模式已切换为 '{new_mode}'。下次启动仍有效。")
 
 
+def menu_select_template():
+    """Let the user pick which active template should be used for generation."""
+    print("\n[选择生效模板]")
+    templates = template_engine.list_templates()
+    if not templates:
+        print("❌ 没有激活模板。请先到菜单 6 导入/确认模板。")
+        return
+
+    current = config.get_selected_template()
+    print("可用模板：")
+    print("  [0] 按销售阶段自动选择")
+    for i, name in enumerate(templates, start=1):
+        marker = " *" if name == current else "  "
+        print(f"{marker}[{i}] {name}")
+
+    choice = _prompt_with_hint(
+        f"请选择模板（0-{len(templates)}）或按 Enter 保持当前：",
+        "0 恢复自动规则，其他编号强制使用该模板"
+    ).strip()
+    if not choice:
+        print("无变化。")
+        return
+    try:
+        idx = int(choice)
+    except ValueError:
+        print("无效输入。")
+        return
+
+    settings = data_store.load_settings()
+    if idx == 0:
+        settings["selected_template"] = ""
+        data_store.save_settings(settings)
+        print("✅ 已恢复按销售阶段自动选择模板。")
+    elif 1 <= idx <= len(templates):
+        selected = templates[idx - 1]
+        settings["selected_template"] = selected
+        data_store.save_settings(settings)
+        print(f"✅ 已选择生效模板：'{selected}'。生成草稿时将优先使用该模板。")
+    else:
+        print("无效编号。")
+
+
 def menu_sender_profile():
     sender_profile_editor.edit_sender_profile_interactive()
 
@@ -309,7 +354,7 @@ def menu_settings():
         _print_settings_menu()
         choice = _prompt_with_hint(
             "请选择设置项：",
-            "[1]发送者信息 [2]切换模型 [3]切换skill [4]配置检查 [0]返回"
+            "[1]发送者信息 [2]切换模型 [3]切换skill [4]配置检查 [5]选择生效模板 [0]返回"
         ).strip()
 
         if choice == "1":
@@ -323,6 +368,9 @@ def menu_settings():
             _wait_for_enter()
         elif choice == "4":
             menu_config()
+            _wait_for_enter()
+        elif choice == "5":
+            menu_select_template()
             _wait_for_enter()
         elif choice == "0":
             print("返回主菜单。")
@@ -457,7 +505,11 @@ def _import_template_flow():
 
 
 def _confirm_template_flow():
-    """Preview active templates and confirm/reset the confirmation flag."""
+    """Preview active templates and confirm/reset the confirmation flag.
+
+    When multiple templates are active, let the user choose which one to confirm
+    and optionally set it as the selected template for generation.
+    """
     from email_agent.preview import open_template_preview
 
     templates = template_engine.list_templates()
@@ -465,13 +517,7 @@ def _confirm_template_flow():
         print("没有激活模板可供确认。请先导入模板。")
         return
 
-    for name in templates:
-        try:
-            preview_path = open_template_preview(name)
-            print(f"🌐 已打开模板 '{name}' 的预览：{preview_path}")
-        except Exception as e:
-            print(f"⚠️ 无法打开模板 '{name}' 的预览：{e}")
-
+    # If template is already confirmed, offer to reset first.
     if config.is_template_confirmed():
         reset = _prompt_with_hint(
             "是否重置确认状态并要求重新确认？ (y/N): ",
@@ -486,13 +532,74 @@ def _confirm_template_flow():
         else:
             return
 
+    # Choose which template(s) to preview/confirm
+    if len(templates) == 1:
+        selected_templates = templates
+    else:
+        print("\n当前激活模板：")
+        for i, name in enumerate(templates, start=1):
+            print(f"  [{i}] {name}")
+        print("  [all] 确认全部模板")
+        choice = _prompt_with_hint(
+            "请选择要确认的模板编号（all 确认全部，0 取消）：",
+            "输入编号预览并确认单个模板"
+        ).strip().lower()
+        if choice == "0":
+            print("已取消。")
+            return
+        if choice == "all":
+            selected_templates = templates
+        else:
+            try:
+                idx = int(choice)
+                if idx < 1 or idx > len(templates):
+                    print("无效编号。")
+                    return
+                selected_templates = [templates[idx - 1]]
+            except ValueError:
+                print("无效输入。")
+                return
+
+    # Preview each selected template
+    for name in selected_templates:
+        try:
+            preview_path = open_template_preview(name)
+            print(f"🌐 已打开模板 '{name}' 的预览：{preview_path}")
+        except Exception as e:
+            print(f"⚠️ 无法打开模板 '{name}' 的预览：{e}")
+
+    # Single-template confirmation: offer to set it as active template
+    if len(selected_templates) == 1:
+        name = selected_templates[0]
+        confirm = _prompt_with_hint(
+            f"确认将模板 '{name}' 用于生成/发送？ (Y/n): ",
+            "[Y] 确认  [n] 保持未确认"
+        ).strip().lower()
+        if confirm in ("y", "yes"):
+            template_importer.confirm_active_template()
+            print(f"✅ 模板 '{name}' 已确认。")
+
+            set_active = _prompt_with_hint(
+                f"是否将 '{name}' 设为强制生效模板（覆盖自动阶段规则）？ (y/N): ",
+                "[y] 设为生效模板  [Enter/N] 仍按阶段自动选择"
+            ).strip().lower()
+            if set_active == "y":
+                settings = data_store.load_settings()
+                settings["selected_template"] = name
+                data_store.save_settings(settings)
+                print(f"✅ '{name}' 已设为生效模板。")
+        else:
+            print("模板保持未确认。生成和发送已被阻断。")
+        return
+
+    # Multi-template (all) confirmation
     confirm = _prompt_with_hint(
-        "确认将此模板用于生成/发送？ (Y/n): ",
-        "[Y] 确认  [n] 保持未确认"
+        f"确认将 {len(selected_templates)} 个模板用于生成/发送？ (Y/n): ",
+        "[Y] 确认全部  [n] 保持未确认"
     ).strip().lower()
     if confirm in ("y", "yes"):
         template_importer.confirm_active_template()
-        print("✅ 模板已确认。")
+        print(f"✅ {len(selected_templates)} 个模板已确认。")
     else:
         print("模板保持未确认。生成和发送已被阻断。")
 

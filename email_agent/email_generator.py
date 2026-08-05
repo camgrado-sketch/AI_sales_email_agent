@@ -115,10 +115,16 @@ def generate_for_customer(customer, language=None):
 
     customer_id = customer.get("id") or customer.get("customer_id")
     analysis = interaction_analyzer.analyze(customer)
-    template_name = analysis["template_type"]
-    chosen_language = language or analysis.get("language", "cn")
 
+    # User-selected template overrides automatic stage-based selection
+    selected = config.get_selected_template()
     available_templates = template_engine.list_templates()
+    if selected and selected in available_templates:
+        template_name = selected
+    else:
+        template_name = analysis["template_type"]
+
+    chosen_language = language or analysis.get("language", "cn")
     if template_name not in available_templates:
         if available_templates:
             fallback = available_templates[0]
