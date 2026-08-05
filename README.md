@@ -1,8 +1,8 @@
 # AI Sales Email Agent
 
-面向家具设计行业（GRADO CONTRACT）的 AI 销售邮件自动化 Demo。从 `data/customers.csv` 读取客户，由 LLM 基于已确认邮件模板生成个性化 HTML 邮件，经浏览器预览 + 终端审核后，通过腾讯企业邮箱 SMTP 发送，再用 IMAP 采集回复。
+面向家具设计行业（GRADO CONTRACT）的 AI 销售邮件自动化 Demo。从 `data/customers.csv` 读取客户，基于已确认的 HTML 邮件模板做**本地变量替换**生成邮件草稿，经浏览器预览 + 终端审核后，通过腾讯企业邮箱 SMTP 发送，再用 IMAP 采集回复。
 
-> **注意**：旧版 `README.md` 描述的 Manus 沙盒 + `drafts.csv` 手工流程已废弃。当前版本为应用内 LLM 直连、草稿主存储为 `data/drafts.json`、入口为交互式 CLI。
+> **注意**：旧版 `README.md` 描述的 Manus 沙盒 + `drafts.csv` 手工流程已废弃。当前版本为应用内 LLM 直连（**仅用于模板结构化**）、草稿主存储为 `data/drafts.json`、入口为交互式 CLI。
 
 ---
 
@@ -27,12 +27,13 @@
 
 - Python 3.10+
 - 建议使用虚拟环境
-- 一个支持浏览器打开的桌面环境（用于邮件/模板预览；WSL 无桌面时会打印临时文件路径）
+- 用于预览的桌面环境（可选）：项目使用 Playwright Chromium 自动打开预览；无桌面环境时会自动生成 PNG 截图或打印临时文件路径
 
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
+playwright install chromium
 ```
 
 > `httpx==0.27.2` 的 pin 必须保留，`openai==1.46.0` 与 `httpx 0.28+` 不兼容，否则会报 `Client.__init__() got an unexpected keyword argument 'proxies'`。
@@ -46,7 +47,7 @@ pip install -r requirements.txt
 
 ### 3. LLM API 准备
 
-项目支持 OpenAI 兼容接口。在 `.env` 中配置 API Key、base URL 和模型名称。详见下文 [多模型配置](#多模型配置)。
+LLM 仅用于**模板导入时的结构识别**，不再参与每封邮件的生成。配置一个 OpenAI 兼容接口即可。详见下文 [多模型配置](#多模型配置)。
 
 ### 4. 配置文件 `.env`
 
@@ -62,6 +63,7 @@ LLM_MODEL=gpt-4o-mini
 
 SENDER_NAME=Your Name
 SENDER_TITLE=Partnership Manager
+SENDER_COMPANY=GRADO CONTRACT
 SENDER_MARKET_REGION=Global
 ```
 
@@ -87,10 +89,8 @@ python main.py
 | `3` | 发送已审核邮件（Ctrl+C 暂停） |
 | `4` | 检查回复（浏览器列表 + 终端 S/R/Q） |
 | `5` | 查看日志 |
-| `6` | 配置检查 |
-| `7` | 切换当前 LLM 模型 |
-| `8` | 导入 / 确认邮件模板 |
-| `9` | 切换 skill 模式（full / concise） |
+| `6` | 导入 / 确认邮件模板 |
+| `S` | 设置（发送者信息 / 切换模型 / 切换 skill / 配置检查） |
 | `D` | 删除草稿 |
 | `0` | 退出 |
 
@@ -98,15 +98,18 @@ python main.py
 
 ## 核心交互流程
 
-### 1. 导入并确认邮件模板（菜单 8）
+### 1. 导入并确认邮件模板（菜单 6）
 
 首次使用或更新模板时，必须完成此步骤：
 
 1. 将模板源文件（`.md` / `.docx` / `.pdf`）放入 `templates/import/`。
-2. 运行菜单 8，系统会检测新文件并提示导入。
-3. 系统自动归档旧模板到 `templates/archive/YYYY/MM/DD/`。
-4. 系统先将源文件洗成 Markdown 中间层，再合并进现有 `template.html`，保留版式、图片/链接位置、`{{var}}` 和 `{{IMAGE:name}}` 占位符。
-5. 若只上传中文/英文单一语言，系统会自动生成另一语言版本（`template_en.html` / `template_cn.html`）。
+2. 运行菜单 6，系统会检测新文件并提示导入。
+3. 系统自动归档旧模板到 `templates/archive/<template_name>/YYYY/MM/DD/<HHMMSS>/`。
+4. 系统将源文件解析为 Markdown 后，**调用一次 LLM** 识别邮件主体、图片/文件/链接位置、可替换变量，输出中英双语 HTML 模板。
+5. 本地脚本写入 `templates/email/<name>/`：
+   - `template.html`（源语言）
+   - `template_en.html` 或 `template_cn.html`（另一语言）
+   - `config.yaml`（变量/图片/文件清单）
 6. 浏览器自动打开模板预览；在终端输入 `Y` 确认后，模板才正式启用。
 
 **未确认模板时，菜单 1（生成）和菜单 3（发送）会被红色状态栏阻断。**
@@ -116,7 +119,8 @@ python main.py
 - 系统读取 `data/customers.csv`。
 - `name` 以 `#` 开头的客户会被跳过。
 - 根据客户 `location` 判断邮件语言：中国大陆默认中文；香港、台湾、海外默认英文；可用 `(中文)` / `(英文)` 后缀强制覆盖。
-- 每封草稿会记录生成时间、使用的模型、token 消耗（`prompt_tokens` / `completion_tokens` / `total_tokens`）。
+- **不再调用 LLM**：从 `templates/sender_profile.md` 与 `customers.csv` 硬性映射变量，直接替换模板占位符。
+- 每封草稿记录 `rendered_by: "local"`。
 - 支持 Ctrl+C 暂停，重新运行会从断点续跑。
 
 ### 3. 审核草稿（菜单 2）
@@ -124,7 +128,7 @@ python main.py
 每封草稿会自动在浏览器中打开完整 HTML 预览（图片内联为 base64），终端显示：
 
 ```
-[Y] Approve  [N] Reject  [S] Skip  [E] Edit  [Q] Quit review
+[Y] 通过  [N] 拒绝  [S] 跳过  [E] 编辑  [Q] 退出审核
 ```
 
 ### 4. 发送已审核邮件（菜单 3）
@@ -146,19 +150,20 @@ python main.py
 
 ### 寄件人身份
 
-编辑 `templates/sender_profile.md` 的 YAML frontmatter：
+推荐通过菜单 `S` → `1` 编辑发送者信息，保存到 `templates/sender_profile.md`。也可直接编辑该文件：
 
 ```markdown
 ---
 sender_name: "张三"
 sender_title: "商务拓展经理"
+sender_company: "GRADO CONTRACT"
 sender_market_region: "大中华区"
 sender_phone: "+86 138 0000 0000"
-sender_email: "zhangsan@gradocontract.com"
+sender_email: "zhangsan@gradodesign.hk"
 ---
 ```
 
-此文件优先级高于 `.env` 中的同名变量，便于非技术人员直接修改。
+此文件优先级高于 `.env` 中的同名变量。
 
 ### 客户清单
 
@@ -177,9 +182,13 @@ sender_email: "zhangsan@gradocontract.com"
 
 ### 邮件模板
 
-- 激活模板存放于 `templates/email/<name>/`（`config.yaml` + `template.html`）。
-- 更新模板请通过菜单 8 导入，系统会自动归档旧版本。
-- 如需新增模板，在 `templates/email/` 下新建目录并放入 `config.yaml` + `template.html`，系统启动后自动识别。
+- 激活模板存放于 `templates/email/<name>/`（`config.yaml` + `template.html` + 双语变体）。
+- 更新模板请通过菜单 6 导入，系统会自动归档旧版本。
+- 模板占位符统一使用**大写下划线**：
+  - 发送者：`{{SENDER_NAME}}`、`{{SENDER_TITLE}}`、`{{SENDER_COMPANY}}` 等
+  - 客户：`{{CUSTOMER_FIRST_NAME}}`、`{{CUSTOMER_NAME}}`、`{{CUSTOMER_COMPANY}}` 等
+  - 图片：`{{IMAGE:hero}}`
+  - 文件下载链接：`{{FILE:catalog_pdf}}`
 
 ### 风控参数
 
@@ -196,11 +205,11 @@ sender_email: "zhangsan@gradocontract.com"
 ### LLM 模型
 
 - 通过 `.env` 的 `MODEL_*` 编号块配置多个模型（详见 [多模型配置](#多模型配置)）。
-- 运行时通过菜单 7 切换，选择持久化到 `data/settings.json`。
+- 运行时通过菜单 `S` → `2` 切换，选择持久化到 `data/settings.json`。
 
 ### Skill 模式
 
-菜单 9 可在 `full`（完整品牌规范）和 `concise`（精简版）之间切换。
+菜单 `S` → `3` 可在 `full` 与 `concise` 之间切换。当前 skill 文件仅在模板导入时作为参考，不再用于每封邮件生成。
 
 ### 清理状态
 
@@ -220,16 +229,19 @@ rm data/template_import_state.json
 templates/import/<file>.md|docx|pdf
         │
         ▼
-extract_to_markdown()      → Markdown 中间层
+extract_to_markdown()           → Markdown 中间层
         │
         ▼
-merge_markdown_into_template() → 更新 templates/email/<name>/template.html
+structure_template_with_llm()   → {subject_template, cn_html, en_html, variables, images, files}
         │
         ▼
-generate_missing_language() → 生成 template_en.html / template_cn.html
+write_structured_template()     → templates/email/<name>/
+                                    ├── config.yaml
+                                    ├── template.html
+                                    └── template_en.html / template_cn.html
         │
         ▼
-archive_current_template()  → templates/archive/YYYY/MM/DD/<name>_<HHMMSS>/
+archive_current_template()      → templates/archive/<name>/YYYY/MM/DD/<HHMMSS>/
         │
         ▼
 浏览器预览 + 终端确认 → template_confirmed = true
@@ -258,7 +270,7 @@ MODEL_2_TEMPERATURE=0.7
 ```
 
 - 无编号块时自动回退到旧版单模型变量 `LLM_API_KEY` / `LLM_BASE_URL` / `LLM_MODEL`。
-- 菜单 7 会显示 `[编号] 模型名 (模型ID)`，输入编号即可切换。
+- 菜单 `S` → `2` 会显示 `[编号] 模型名 (模型ID)`，输入编号即可切换。
 - 当前选择保存在 `data/settings.json` 的 `active_model_index`。
 
 ---
@@ -286,13 +298,13 @@ MODEL_2_TEMPERATURE=0.7
 ## 常见问题
 
 **Q: 启动后状态栏红色，提示 Template not confirmed。**  
-A: 先通过菜单 8 导入/确认模板。
+A: 先通过菜单 6 导入/确认模板。
 
 **Q: 浏览器没有自动弹出预览。**  
-A: 在 WSL/无桌面环境中，`webbrowser` 无法打开浏览器，系统会打印临时 HTML 文件路径，可手动复制到浏览器打开。
+A: 项目使用 Playwright Chromium。无桌面环境时会自动生成 `data/latest_preview.png` 并打印路径；也可在 `.env` 中设置 `BROWSER` 作为兜底。
 
-**Q: 生成草稿时报 `Expecting value: line 1 column 1 (char 0)`。**  
-A: 若使用 Moonshot，确保 `LLM_BASE_URL` 含 `moonshot` 且 `LLM_MODEL` 支持当前接口；如使用其他厂商，确保其支持 `json_schema` 或改走 prompt 注入。清理 `__pycache__` 也可能解决缓存问题：
+**Q: 导入模板时 LLM 返回空或报错 `Expecting value: line 1 column 1`。**  
+A: 若使用 Moonshot，确保 `LLM_BASE_URL` 含 `moonshot`；如使用其他厂商，确保其支持 `json_schema` 或改走 prompt 注入。清理 `__pycache__`：
 
 ```bash
 find email_agent -name "__pycache__" -exec rm -rf {} +
@@ -301,8 +313,11 @@ find email_agent -name "__pycache__" -exec rm -rf {} +
 **Q: 邮件发送被拦截。**  
 A: Demo 模式下只允许发送到 `ALLOWED_TEST_EMAILS`；检查收件邮箱是否在白名单。
 
-**Q: 草稿中出现中英文混用或随机寄件人名。**  
-A: 检查 `templates/sender_profile.md` 是否填写正确；重新导入并确认模板；确保 `skills/email_writing_skill.md` 未被手动覆盖。
+**Q: 草稿中出现未替换的 `{{VAR}}`。**  
+A: 检查 `templates/sender_profile.md` 与 `data/customers.csv` 是否包含对应字段；重新导入模板以生成最新占位符。
+
+**Q: 文件下载链接在收件人那里无法点击。**  
+A: `{{FILE:name}}` 默认渲染为本地 `file://` 链接，仅方便本地预览。发送前请替换为公网可访问的 URL，或改用邮件附件方式。
 
 ---
 
@@ -326,14 +341,15 @@ AI_sales_email_agent/
 ├── email_agent/                # 核心代码
 │   ├── config.py
 │   ├── cli_controller.py
+│   ├── sender_profile_editor.py
 │   ├── data_store.py
 │   ├── llm_client.py
 │   ├── interaction_analyzer.py
 │   ├── template_engine.py
-│   ├── template_importer.py    # 模板导入
+│   ├── template_importer.py
 │   ├── email_generator.py
-│   ├── preview.py              # 浏览器预览
-│   ├── status.py               # 状态栏
+│   ├── preview.py
+│   ├── status.py
 │   ├── deliverability.py
 │   ├── sender.py
 │   ├── receiver.py
@@ -341,16 +357,20 @@ AI_sales_email_agent/
 ├── templates/
 │   ├── email/                  # 激活的邮件模板
 │   ├── import/                 # 用户拖入的模板源文件
-│   ├── archive/                # 历史模板归档 YYYY/MM/DD
+│   ├── archive/                # 历史模板归档
 │   └── sender_profile.md       # 寄件人身份配置
-├── assets/images/              # 模板内联图片
+├── assets/
+│   ├── images/                 # 模板内联图片
+│   └── files/                  # 模板文件下载占位
 ├── prompts/
-│   └── email_generation_prompt.md
+│   ├── email_generation_prompt.md
+│   └── template_import_prompt.md
 ├── skills/
 │   ├── email_writing_skill.md
 │   └── email_writing_skill_concise.md
 ├── main.py
 ├── README.md
+├── CHANGELOG.md
 ├── requirements.txt
 └── .env.example
 ```
