@@ -310,12 +310,14 @@ def _default_config_yaml(template_name, structured):
     variables = structured.get("variables", [])
     images = structured.get("images", [])
     files = structured.get("files", [])
+    subject_template = structured.get("subject_template", "")
 
     lines = [
         f"template_name: {template_name}",
         "purpose: Auto-imported template",
         "customer_type: all",
         "recommended_stage: new_lead",
+        f"subject_template: {subject_template!r}",
         "variables:",
     ]
     for v in variables:

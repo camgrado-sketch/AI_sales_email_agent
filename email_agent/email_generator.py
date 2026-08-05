@@ -1,14 +1,8 @@
-import json
 import os
 import re
 from datetime import datetime
 
-from email_agent import config, data_store, interaction_analyzer, llm_client, template_engine
-
-
-def _read_file(path):
-    with open(path, "r", encoding="utf-8") as f:
-        return f.read()
+from email_agent import config, data_store, interaction_analyzer, template_engine
 
 
 def _extract_first_name(name):
@@ -17,147 +11,55 @@ def _extract_first_name(name):
     return name.split()[0]
 
 
-def _build_variable_schema(template_config):
-    """Build a JSON schema describing the variables the LLM must return."""
-    variables = template_config.get("variables", [])
-    properties = {
-        "subject": {"type": "string"},
-        "personalization_note": {"type": "string"},
-        "variables": {
-            "type": "object",
-            "properties": {v: {"type": "string"} for v in variables},
-            "required": variables,
-            "additionalProperties": False,
-        },
-    }
-    return {
-        "name": "email_variables",
-        "type": "object",
-        "properties": properties,
-        "required": ["subject", "personalization_note", "variables"],
-        "additionalProperties": False,
-    }
+def _current_date(language="cn"):
+    """Return a human-readable date string in the requested language."""
+    now = datetime.now()
+    if language == "cn":
+        return now.strftime("%Y年%m月%d日")
+    return now.strftime("%B %d, %Y")
 
 
-def _build_system_prompt(template_config):
-    """Build the system prompt, selecting full or concise skill based on config."""
-    skill_file = (
-        config.EMAIL_WRITING_SKILL_FILE
-        if config.SKILL_MODE == "full"
-        else config.EMAIL_WRITING_SKILL_CONCISE_FILE
-    )
-    writing_skill = _read_file(skill_file)
-    generation_prompt = _read_file(config.EMAIL_GENERATION_PROMPT_FILE)
-    rules = "\n".join(f"- {r}" for r in template_config.get("rules", []))
+def _build_variables(customer, template_config):
+    """Build a variables dict from sender profile and customer record.
+
+    All keys are uppercase so they match the {{VAR}} placeholders in templates.
+    Missing values fall back to empty strings; the template engine will warn
+    about unresolved placeholders.
+    """
     sender = config.load_sender_profile()
-    return f"""You are a professional business email writer representing GRADO CONTRACT.
 
-Sender identity (MUST use exactly, do not invent):
-- sender_name: {sender.get('sender_name', '')}
-- sender_title: {sender.get('sender_title', '')}
-- market_region: {sender.get('sender_market_region', '')}
-
-Follow the brand writing skill below strictly:
-
-{writing_skill}
-
-Generation instructions:
-
-{generation_prompt}
-
-Template-specific rules:
-{rules}
-
-Return ONLY a JSON object matching the provided schema."""
-
-
-def _build_user_prompt(customer, analysis):
-    return f"""Customer information:
-- ID: {customer.get('id')}
-- Name: {customer.get('name')}
-- Company: {customer.get('company')}
-- Position: {customer.get('position')}
-- Industry: {customer.get('industry')}
-- Location: {customer.get('location')}
-- Company type: {customer.get('company_type')}
-
-Sales stage analysis:
-- Stage: {analysis['stage']}
-- Recommended template: {analysis['template_type']}
-- Strategy: {analysis['strategy']}
-- Language: {analysis.get('language', 'cn')}
-
-Fill in the template variables and produce the subject line and personalization note.
-Language rule: the email body must be written entirely in the language specified above. Do not mix Chinese and English in the same paragraph."""
-
-
-def generate_for_customer(customer, language=None):
-    """Generate a single draft for a customer and persist it immediately."""
-    if not config.is_template_confirmed():
-        raise RuntimeError("No template confirmed. Please import and confirm a template first (menu 8).")
-
-    customer_id = customer.get("id") or customer.get("customer_id")
-    analysis = interaction_analyzer.analyze(customer)
-    template_name = analysis["template_type"]
-    chosen_language = language or analysis.get("language", "cn")
-
-    available_templates = template_engine.list_templates()
-    if template_name not in available_templates:
-        if available_templates:
-            fallback = available_templates[0]
-            print(f"⚠️ 推荐模板 '{template_name}' 未激活，回退使用 '{fallback}'")
-            template_name = fallback
-        else:
-            raise RuntimeError("没有可用的激活模板，请先到菜单 8 导入/确认模板。")
-
-    template_config = template_engine.get_template_config(template_name)
-    schema = _build_variable_schema(template_config)
-
-    system_prompt = _build_system_prompt(template_config)
-    user_prompt = _build_user_prompt(customer, analysis)
-
-    start_time = datetime.now()
-    raw = llm_client.complete_json(system_prompt, user_prompt, schema, temperature=0.7)
-    result = json.loads(raw["content"])
-
-    variables = result.get("variables", {})
-    sender = config.load_sender_profile()
-    # Override sender identity strictly from sender_profile/.env
-    variables["sender_name"] = sender.get("sender_name", config.SENDER_NAME)
-    variables["sender_title"] = sender.get("sender_title", config.SENDER_TITLE)
-    variables["market_region"] = sender.get("sender_market_region", config.SENDER_MARKET_REGION)
-    variables["customer_first_name"] = _extract_first_name(customer.get("name", ""))
-    variables["company_name"] = customer.get("company", "")
-
-    html_body, images = template_engine.render(template_name, variables, language=chosen_language)
-
-    active_model = config.get_active_model()
-    draft_id = data_store.generate_draft_id(customer_id)
-    draft = {
-        "draft_id": draft_id,
-        "customer_id": customer_id,
-        "email": customer.get("email", ""),
-        "template": template_name,
-        "stage": analysis["stage"],
-        "language": chosen_language,
-        "subject": result.get("subject", ""),
-        "html_body": html_body,
-        "text_body": _html_to_text(html_body),
-        "images": images,
-        "personalization_note": result.get("personalization_note", ""),
-        "review_status": "pending",
-        "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        "model_used": active_model.get("name", active_model.get("model", "")) if active_model else "",
-        "generation_meta": {
-            "generation_time": start_time.isoformat(),
-            "prompt_tokens": raw["usage"]["prompt_tokens"],
-            "completion_tokens": raw["usage"]["completion_tokens"],
-            "total_tokens": raw["usage"]["total_tokens"],
-        },
+    variables = {
+        # Sender identity
+        "SENDER_NAME": sender.get("sender_name", config.SENDER_NAME),
+        "SENDER_TITLE": sender.get("sender_title", config.SENDER_TITLE),
+        "SENDER_COMPANY": sender.get("sender_company", getattr(config, "SENDER_COMPANY", "")),
+        "SENDER_EMAIL": sender.get("sender_email", config.SENDER_EMAIL),
+        "SENDER_PHONE": sender.get("sender_phone", config.SENDER_PHONE),
+        "SENDER_MARKET_REGION": sender.get("sender_market_region", config.SENDER_MARKET_REGION),
+        # Customer identity
+        "CUSTOMER_FIRST_NAME": _extract_first_name(customer.get("name", "")),
+        "CUSTOMER_NAME": customer.get("name", ""),
+        "CUSTOMER_COMPANY": customer.get("company", ""),
+        "CUSTOMER_POSITION": customer.get("position", ""),
+        "CUSTOMER_LOCATION": customer.get("location", ""),
+        "CUSTOMER_INDUSTRY": customer.get("industry", ""),
+        # Derived/static
+        "CURRENT_DATE": _current_date(language="cn"),
     }
 
-    data_store.append_draft(draft)
-    return draft
+    # Include any variables declared in config.yaml that have a direct customer key
+    declared = template_config.get("variables", [])
+    for var in declared:
+        key = str(var).strip().upper()
+        if key not in variables:
+            # Try to map some legacy/customer keys automatically
+            customer_key = key.lower().replace("customer_", "")
+            if customer_key in customer:
+                variables[key] = customer[customer_key]
+            else:
+                variables[key] = ""
+
+    return variables
 
 
 def _html_to_text(html_body):
@@ -188,6 +90,80 @@ def _is_skipped_customer(customer):
     return name.startswith("#")
 
 
+def generate_for_customer(customer, language=None):
+    """Generate a single draft for a customer using local template variable replacement."""
+    if not config.is_template_confirmed():
+        raise RuntimeError("No template confirmed. Please import and confirm a template first (menu 6).")
+
+    customer_id = customer.get("id") or customer.get("customer_id")
+    analysis = interaction_analyzer.analyze(customer)
+    template_name = analysis["template_type"]
+    chosen_language = language or analysis.get("language", "cn")
+
+    available_templates = template_engine.list_templates()
+    if template_name not in available_templates:
+        if available_templates:
+            fallback = available_templates[0]
+            print(f"⚠️ 推荐模板 '{template_name}' 未激活，回退使用 '{fallback}'")
+            template_name = fallback
+        else:
+            raise RuntimeError("没有可用的激活模板，请先到菜单 6 导入/确认模板。")
+
+    template_config = template_engine.get_template_config(template_name)
+    variables = _build_variables(customer, template_config)
+    # Update CURRENT_DATE to match the chosen language
+    variables["CURRENT_DATE"] = _current_date(language=chosen_language)
+
+    html_body, images, files = template_engine.render(
+        template_name, variables, language=chosen_language
+    )
+
+    # Build subject from template config if it contains a declared subject_template,
+    # otherwise use the template's subject_template. The template importer writes a
+    # subject line into config.yaml as the first rule for reference; we render it here.
+    subject = _render_subject(template_config, variables)
+
+    draft_id = data_store.generate_draft_id(customer_id)
+    draft = {
+        "draft_id": draft_id,
+        "customer_id": customer_id,
+        "email": customer.get("email", ""),
+        "template": template_name,
+        "stage": analysis["stage"],
+        "language": chosen_language,
+        "subject": subject,
+        "html_body": html_body,
+        "text_body": _html_to_text(html_body),
+        "images": images,
+        "files": files,
+        "personalization_note": "",
+        "review_status": "pending",
+        "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "rendered_by": "local",
+    }
+
+    data_store.append_draft(draft)
+    return draft
+
+
+def _render_subject(template_config, variables):
+    """Render the subject line template with variables.
+
+    If config.yaml contains a 'subject_template' key, use it; otherwise fall back
+    to a generic subject. The importer writes the LLM-generated subject into the
+    config for traceability.
+    """
+    subject_template = template_config.get("subject_template", "")
+    if not subject_template:
+        return ""
+
+    def replace_var(match):
+        var_name = match.group(1).strip().upper()
+        return str(variables.get(var_name, match.group(0)))
+
+    return re.sub(r"\{\{([^{}:]+)\}\}", replace_var, subject_template)
+
+
 def generate_all(customers=None):
     """Generate drafts for all (or provided) customers and save to drafts.json.
 
@@ -195,7 +171,7 @@ def generate_all(customers=None):
     next unprocessed customer.
     """
     if not config.is_template_confirmed():
-        print("❌ No template confirmed. Please import and confirm a template first (menu 8).")
+        print("❌ 没有已确认的模板。请先到菜单 6 导入/确认模板。")
         return []
 
     if customers is None:

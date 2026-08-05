@@ -2,6 +2,20 @@
 
 ## 2026-08-05
 
+### TASK-4: 邮件生成器重构（核心）
+
+- **修改文件**：`email_agent/email_generator.py`、`email_agent/template_importer.py`
+- **核心逻辑**：
+  - 移除 `email_generator.py` 中的 per-customer LLM 调用；
+  - 新增 `_build_variables()`，从 `templates/sender_profile.md` 与 `data/customers.csv` 硬性映射大写变量；
+  - 新增 `_render_subject()`，根据 `config.yaml` 中的 `subject_template` 本地渲染主题；
+  - 草稿字段新增 `files`、`rendered_by: "local"`，移除 `model_used` 与 `generation_meta`；
+  - `template_importer.py` 生成的 `config.yaml` 中增加 `subject_template` 字段。
+- **潜在风险**：
+  - 旧草稿中的 `model_used`/`generation_meta` 字段不再生成，但读取旧数据不会崩溃；
+  - 若 `config.yaml` 缺少 `subject_template`，主题行为空，需重新导入模板。
+- **下一步建议**：简化 `interaction_analyzer.py`，移除 `_llm_strategy()`。
+
 ### TASK-3: 发送者信息管理
 
 - **修改文件**：`email_agent/sender_profile_editor.py`、`email_agent/config.py`
