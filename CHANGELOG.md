@@ -2,6 +2,18 @@
 
 ## 2026-08-05
 
+### TASK-3: 发送者信息管理
+
+- **修改文件**：`email_agent/sender_profile_editor.py`、`email_agent/config.py`
+- **核心逻辑**：
+  - 新增 `email_agent/sender_profile_editor.py`，提供 `edit_sender_profile_interactive()` 交互式编辑发送者信息；
+  - 读取现有 `templates/sender_profile.md`，逐项提示，回车保留原值，保存为 YAML frontmatter；
+  - `config.py` 新增 `SENDER_COMPANY` 默认值，并纳入 `load_sender_profile()` 返回字典。
+- **潜在风险**：
+  - 若 `templates/sender_profile.md` 已存在但 frontmatter 格式异常，会回退到 `.env` 默认值；
+  - 编辑后仅刷新内存中的 `config.*` 值，不影响已生成的草稿。
+- **下一步建议**：重构 `email_generator.py`，移除 per-customer LLM，改为本地变量替换。
+
 ### TASK-2: 模板引擎扩展
 
 - **修改文件**：`email_agent/template_engine.py`、`email_agent/config.py`

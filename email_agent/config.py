@@ -31,6 +31,7 @@ LLM_MODEL = os.getenv("LLM_MODEL", "gpt-4o-mini")
 # -----------------------------------------------------------------------------
 SENDER_NAME = os.getenv("SENDER_NAME", "[Your Name]")
 SENDER_TITLE = os.getenv("SENDER_TITLE", "Partnership Manager")
+SENDER_COMPANY = os.getenv("SENDER_COMPANY", "GRADO CONTRACT")
 SENDER_MARKET_REGION = os.getenv("SENDER_MARKET_REGION", "Global")
 SENDER_PHONE = os.getenv("SENDER_PHONE", "")
 SENDER_EMAIL = os.getenv("SENDER_EMAIL", EMAIL_ACCOUNT or "")
@@ -201,6 +202,7 @@ def load_sender_profile():
     defaults = {
         "sender_name": SENDER_NAME,
         "sender_title": SENDER_TITLE,
+        "sender_company": SENDER_COMPANY,
         "sender_market_region": SENDER_MARKET_REGION,
         "sender_phone": SENDER_PHONE,
         "sender_email": SENDER_EMAIL,
