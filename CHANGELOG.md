@@ -2,6 +2,18 @@
 
 ## 2026-08-05
 
+### TASK-5: 互动分析器简化
+
+- **修改文件**：`email_agent/interaction_analyzer.py`
+- **核心逻辑**：
+  - 删除 `_llm_strategy()` 及 `llm_client` 导入，不再调用远程 LLM；
+  - `analyze()` 仅基于 `_rule_based_stage()` 与 `_detect_language()` 返回 stage、template_type、language、strategy；
+  - strategy 改为本地规则映射，保持与原有 LLM 策略语义一致。
+- **潜在风险**：
+  - 对客户阶段/策略的判定不再有个性化 LLM 推理，但规则逻辑与之前一致，不影响生成流程；
+  - 若未来需要 LLM 增强策略，可在本模块重新注入，不影响其他模块。
+- **下一步建议**：改造 `preview.py`，接入 Playwright Chromium 预览。
+
 ### TASK-4: 邮件生成器重构（核心）
 
 - **修改文件**：`email_agent/email_generator.py`、`email_agent/template_importer.py`
