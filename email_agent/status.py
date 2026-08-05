@@ -25,22 +25,22 @@ def compute_status():
 
     # Red conditions
     if not config.EMAIL_ACCOUNT or not config.EMAIL_PASSWORD:
-        messages.append("Missing email account or password (.env)")
+        messages.append("缺少邮箱账号或密码（请检查 .env）")
     if not config.get_active_model():
-        messages.append("No LLM model configured (.env)")
+        messages.append("未配置 LLM 模型（请检查 .env）")
     customers = data_store.load_customers()
     if not customers:
-        messages.append("No customers found (data/customers.csv)")
+        messages.append("未找到客户（data/customers.csv）")
     templates = template_engine.list_templates()
     if not templates:
-        messages.append("No email templates found (templates/email/)")
+        messages.append("未找到邮件模板（templates/email/）")
     if not config.is_template_confirmed():
-        messages.append("Template not confirmed (menu 8)")
+        messages.append("模板未确认（请使用菜单 8）")
 
     if messages:
         return {
             "color": "red",
-            "label": "BLOCKED",
+            "label": "阻塞",
             "messages": messages,
         }
 
@@ -48,31 +48,31 @@ def compute_status():
     yellow_reasons = []
     try:
         if template_importer.detect_changes():
-            yellow_reasons.append("New template files in templates/import/ waiting to be processed")
+            yellow_reasons.append("templates/import/ 中有新模板文件待处理")
     except Exception:
         pass
 
     if data_store.load_generation_state():
-        yellow_reasons.append("Generation paused or in progress")
+        yellow_reasons.append("生成任务已暂停或进行中")
     if data_store.load_sending_state().get("remaining_draft_ids"):
-        yellow_reasons.append("Sending paused or in progress")
+        yellow_reasons.append("发送任务已暂停或进行中")
     if _has_pending_or_approved_drafts():
-        yellow_reasons.append("Pending or approved drafts need review/sending")
+        yellow_reasons.append("有待审核或待发送的草稿")
     if _has_unsent_approved():
-        yellow_reasons.append("Approved drafts waiting to be sent")
+        yellow_reasons.append("有已审核通过的草稿等待发送")
 
     if yellow_reasons:
         return {
             "color": "yellow",
-            "label": "READY",
+            "label": "就绪",
             "messages": yellow_reasons,
         }
 
     # Green
     return {
         "color": "green",
-        "label": "ALL CLEAR",
-        "messages": ["Template confirmed and all work up to date"],
+        "label": "全部就绪",
+        "messages": ["模板已确认，所有任务已就绪"],
     }
 
 

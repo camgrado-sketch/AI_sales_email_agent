@@ -1,4 +1,5 @@
 import os
+import re
 import sys
 
 from email_agent import config, data_store, status, template_engine, template_importer
@@ -10,30 +11,30 @@ def _clear_screen():
 
 def _print_header():
     print("=" * 60)
-    print("     🤖 AI Sales Email Agent - Interactive Console")
+    print("     🤖 AI 销售邮件智能助手 - 交互式控制台")
     print("=" * 60)
     status.print_status_bar()
 
 
 def _print_menu():
-    print("\nMain Menu:")
-    print("  1. Generate drafts")
-    print("  2. Review drafts")
-    print("  3. Send approved emails")
-    print("  4. Check replies")
-    print("  5. View logs")
-    print("  6. Configuration check")
-    print("  7. Switch active model")
-    print("  8. Import / confirm template")
-    print("  9. Toggle skill mode")
-    print("  D. Delete drafts")
-    print("  0. Exit")
+    print("\n主菜单：")
+    print("  [1] 生成草稿")
+    print("  [2] 审核草稿")
+    print("  [3] 发送已审核邮件")
+    print("  [4] 检查回复")
+    print("  [5] 查看日志")
+    print("  [6] 配置检查")
+    print("  [7] 切换当前模型")
+    print("  [8] 导入 / 确认模板")
+    print("  [9] 切换 skill 模式")
+    print("  [D] 删除草稿")
+    print("  [0] 退出")
     print()
 
 
 def _wait_for_enter():
-    print("\n[Enter] Return to main menu")
-    input("Press Enter to return to the menu...")
+    print("\n[Enter] 返回主菜单")
+    input("按 Enter 返回主菜单...")
 
 
 def _active_templates_exist():
@@ -50,83 +51,83 @@ def _prompt_with_hint(prompt, hint=""):
 def _require_confirmed_template():
     confirmed = config.is_template_confirmed()
     if confirmed and not _active_templates_exist():
-        print("⚠️ Template confirmation flag is set but no active templates found. Resetting confirmation.")
+        print("⚠️ 模板确认标志已设置，但未找到激活模板。正在重置确认状态。")
         settings = data_store.load_settings()
         settings["template_confirmed"] = False
         settings["template_confirmed_at"] = None
         data_store.save_settings(settings)
         confirmed = False
     if not confirmed:
-        print("❌ No template confirmed. Please go to menu 8 to import/confirm a template first.")
+        print("❌ 没有已确认的模板。请先到菜单 8 导入/确认模板。")
         return False
     return True
 
 
 def menu_generate():
-    print("\n[Generate Drafts]")
+    print("\n[生成草稿]")
     if not _require_confirmed_template():
         return
-    print("This will analyze customers and generate personalized email drafts.")
+    print("将分析客户并生成个性化邮件草稿。")
     confirm = _prompt_with_hint(
-        "Proceed? (Y/n): ",
-        "[Y] Start generation  [n] Cancel"
+        "是否继续？ (Y/n): ",
+        "[Y] 开始生成  [n] 取消"
     ).strip().lower()
     if confirm and confirm not in ("y", "yes"):
-        print("Cancelled.")
+        print("已取消。")
         return
 
     try:
         from email_agent.email_generator import generate_all
         drafts = generate_all()
-        print(f"✅ Generated/loaded {len(drafts)} draft(s). Saved to {config.DRAFTS_JSON_FILE}")
+        print(f"✅ 已生成/加载 {len(drafts)} 封草稿。保存至 {config.DRAFTS_JSON_FILE}")
     except Exception as e:
-        print(f"❌ Error generating drafts: {e}")
+        print(f"❌ 生成草稿时出错：{e}")
 
 
 def menu_review():
-    print("\n[Review Drafts]")
+    print("\n[审核草稿]")
     drafts = data_store.load_drafts(status="pending")
     if not drafts:
-        print("No pending drafts to review.")
+        print("没有待审核的草稿。")
         return
 
-    print(f"Found {len(drafts)} pending draft(s). Reviewing one by one...\n")
+    print(f"找到 {len(drafts)} 封待审核草稿。逐封审核...\n")
     from email_agent.preview import open_draft_preview
 
     for draft in drafts:
         print("-" * 60)
-        print(f"Customer: {draft.get('customer_id')} <{draft.get('email')}>")
-        print(f"Template: {draft.get('template')} | Stage: {draft.get('stage')} | Language: {draft.get('language', 'default')}")
-        print(f"Subject: {draft.get('subject')}")
-        print(f"Personalization: {draft.get('personalization_note')}")
-        print(f"Model: {draft.get('model_used')} | Tokens: {draft.get('generation_meta', {}).get('total_tokens', 0)}")
+        print(f"客户: {draft.get('customer_id')} <{draft.get('email')}>")
+        print(f"模板: {draft.get('template')} | 阶段: {draft.get('stage')} | 语言: {draft.get('language', 'default')}")
+        print(f"主题: {draft.get('subject')}")
+        print(f"个性化: {draft.get('personalization_note')}")
+        print(f"模型: {draft.get('model_used')} | Token: {draft.get('generation_meta', {}).get('total_tokens', 0)}")
 
         try:
             preview_path = open_draft_preview(draft)
-            print(f"🌐 Browser preview opened: {preview_path}")
+            print(f"🌐 已打开浏览器预览：{preview_path}")
         except Exception as e:
-            print(f"⚠️ Could not open browser preview: {e}")
+            print(f"⚠️ 无法打开浏览器预览：{e}")
 
         while True:
             choice = _prompt_with_hint(
-                "Your choice: ",
-                "[Y] Approve  [N] Reject  [S] Skip  [E] Edit  [Q] Quit review"
+                "请选择：",
+                "[Y] 通过  [N] 拒绝  [S] 跳过  [E] 编辑  [Q] 退出审核"
             ).strip().lower()
             if choice in ("y", "yes"):
                 data_store.update_draft_status(draft.get("draft_id"), "approved")
-                print("Approved.")
+                print("已通过。")
                 break
             elif choice in ("n", "no"):
                 data_store.update_draft_status(draft.get("draft_id"), "rejected")
-                print("Rejected.")
+                print("已拒绝。")
                 break
             elif choice in ("s", "skip"):
-                print("Skipped.")
+                print("已跳过。")
                 break
             elif choice in ("e", "edit"):
                 new_body = _prompt_with_hint(
-                    "Enter updated text body: ",
-                    "[Enter] Keep current body"
+                    "输入更新后的正文：",
+                    "[Enter] 保留当前正文"
                 ).strip()
                 if new_body:
                     draft["text_body"] = new_body
@@ -136,19 +137,19 @@ def menu_review():
                             all_drafts[i] = draft
                             break
                     data_store.save_drafts(all_drafts)
-                    print("Body updated.")
+                    print("正文已更新。")
                 data_store.update_draft_status(draft.get("draft_id"), "approved")
-                print("Approved after edit.")
+                print("编辑后已通过。")
                 break
             elif choice in ("q", "quit"):
-                print("Exiting review.")
+                print("退出审核。")
                 return
             else:
-                print("Invalid choice. Please try again.")
+                print("无效选择，请重试。")
 
 
 def menu_send():
-    print("\n[Send Approved Emails]")
+    print("\n[发送已审核邮件]")
     if not _require_confirmed_template():
         return
     from email_agent.sender import process_queue
@@ -156,7 +157,7 @@ def menu_send():
 
 
 def menu_check_replies():
-    print("\n[Check Replies]")
+    print("\n[检查回复]")
     from email_agent.receiver import check_replies
     from email_agent.preview import open_replies_preview
 
@@ -164,18 +165,18 @@ def menu_check_replies():
     if replies:
         try:
             preview_path = open_replies_preview(replies)
-            print(f"🌐 Browser preview opened: {preview_path}")
+            print(f"🌐 已打开浏览器预览：{preview_path}")
         except Exception as e:
-            print(f"⚠️ Could not open browser preview: {e}")
+            print(f"⚠️ 无法打开浏览器预览：{e}")
 
         while True:
             choice = _prompt_with_hint(
-                "Your choice: ",
-                "[S] Save replies to log  [R] Refresh  [Q] Quit"
+                "请选择：",
+                "[S] 保存回复到日志  [R] 刷新  [Q] 退出"
             ).strip().lower()
             if choice in ("s", "save"):
                 check_replies(dry_run=False)
-                print("✅ Replies saved to reply_logs.csv.")
+                print("✅ 回复已保存到 reply_logs.csv。")
                 break
             elif choice in ("r", "refresh"):
                 replies = check_replies(dry_run=True)
@@ -183,86 +184,186 @@ def menu_check_replies():
                     try:
                         open_replies_preview(replies)
                     except Exception as e:
-                        print(f"⚠️ Could not refresh preview: {e}")
+                        print(f"⚠️ 无法刷新预览：{e}")
                 else:
-                    print("No replies found.")
+                    print("未找到回复。")
             elif choice in ("q", "quit"):
-                print("Cancelled without saving.")
+                print("已取消，未保存。")
                 break
             else:
-                print("Invalid choice.")
+                print("无效选择。")
     else:
-        print("No replies found.")
+        print("未找到回复。")
 
 
 def menu_logs():
-    print("\n[View Logs]")
+    print("\n[查看日志]")
     email_logs = data_store.load_email_logs()
     reply_logs = data_store.load_reply_logs()
-    print(f"Email logs: {len(email_logs)} record(s)")
+    print(f"发送日志：{len(email_logs)} 条记录")
     if email_logs:
         for row in email_logs[-5:]:
             print(f"  - {row.get('send_time')} | {row.get('recipient')} | {row.get('status')}")
-    print(f"Reply logs: {len(reply_logs)} record(s)")
+    print(f"回复日志：{len(reply_logs)} 条记录")
     if reply_logs:
         for row in reply_logs[-5:]:
             print(f"  - {row.get('receive_time')} | {row.get('sender')} | {row.get('status')}")
 
 
 def menu_config():
-    print("\n[Configuration Check]")
+    print("\n[配置检查]")
     active = config.get_active_model()
-    print(f"Email account:     {config.EMAIL_ACCOUNT or 'NOT SET'}")
-    print(f"Email password:    {'SET' if config.EMAIL_PASSWORD else 'NOT SET'}")
-    print(f"Active model:      {active.get('name') if active else 'NOT SET'} ({active.get('model') if active else ''})")
-    print(f"Active base URL:   {active.get('base_url') or 'default' if active else ''}")
-    print(f"Sender profile:    {config.SENDER_PROFILE_FILE}")
-    print(f"  name:            {config.load_sender_profile().get('sender_name')}")
-    print(f"  title:           {config.load_sender_profile().get('sender_title')}")
-    print(f"  region:          {config.load_sender_profile().get('sender_market_region')}")
-    print(f"Skill mode:        {config.SKILL_MODE}")
-    print(f"Template confirmed:{config.is_template_confirmed()}")
-    print(f"Demo mode:         {config.DEMO_MODE}")
-    print(f"Allowed emails:    {config.ALLOWED_TEST_EMAILS}")
-    print(f"Daily send limit:  {config.MAX_DAILY_SENDS}")
-    print(f"Delay range:       {config.MIN_DELAY_SECONDS}s - {config.MAX_DELAY_SECONDS}s")
-    print(f"Drafts JSON:       {config.DRAFTS_JSON_FILE}")
-    print(f"Templates dir:     {config.TEMPLATES_DIR}")
-    print(f"Images dir:        {config.IMAGES_DIR}")
+    print(f"邮箱账号：        {config.EMAIL_ACCOUNT or '未设置'}")
+    print(f"邮箱密码：        {'已设置' if config.EMAIL_PASSWORD else '未设置'}")
+    print(f"当前模型：        {active.get('name') if active else '未设置'} ({active.get('model') if active else ''})")
+    print(f"模型地址：        {active.get('base_url') or 'default' if active else ''}")
+    print(f"寄件人配置：      {config.SENDER_PROFILE_FILE}")
+    print(f"  姓名：          {config.load_sender_profile().get('sender_name')}")
+    print(f"  职位：          {config.load_sender_profile().get('sender_title')}")
+    print(f"  区域：          {config.load_sender_profile().get('sender_market_region')}")
+    print(f"Skill 模式：      {config.SKILL_MODE}")
+    print(f"模板已确认：      {config.is_template_confirmed()}")
+    print(f"Demo 模式：       {config.DEMO_MODE}")
+    print(f"允许邮箱：        {config.ALLOWED_TEST_EMAILS}")
+    print(f"日发送上限：      {config.MAX_DAILY_SENDS}")
+    print(f"延迟范围：        {config.MIN_DELAY_SECONDS}s - {config.MAX_DELAY_SECONDS}s")
+    print(f"草稿文件：        {config.DRAFTS_JSON_FILE}")
+    print(f"模板目录：        {config.TEMPLATES_DIR}")
+    print(f"图片目录：        {config.IMAGES_DIR}")
 
 
 def menu_switch_model():
-    print("\n[Switch Active Model]")
+    print("\n[切换当前模型]")
     models = config.load_available_models()
     if not models:
-        print("❌ No models configured. Check .env")
+        print("❌ 未配置模型，请检查 .env")
         return
 
-    print("Available models:")
+    print("可用模型：")
     for i, m in enumerate(models):
         marker = " *" if i == config._active_model_index() else "  "
         print(f"{marker}[{i}] {m.get('name')} ({m.get('model')})")
 
     choice = _prompt_with_hint(
-        f"Select model (0-{len(models)-1}) or press Enter to keep: ",
-        "Enter a model number or press Enter to keep the current model"
+        f"请选择模型（0-{len(models)-1}）或按 Enter 保持当前：",
+        "输入模型编号或按 Enter 保持当前模型"
     )
     if not choice:
-        print("No change.")
+        print("无变化。")
         return
     try:
         idx = int(choice)
         if idx < 0 or idx >= len(models):
-            print("Invalid selection.")
+            print("无效选择。")
             return
     except ValueError:
-        print("Invalid input.")
+        print("无效输入。")
         return
 
     settings = data_store.load_settings()
     settings["active_model_index"] = idx
     data_store.save_settings(settings)
-    print(f"✅ Active model switched to [{idx}] {models[idx].get('name')}.")
+    print(f"✅ 已切换到模型 [{idx}] {models[idx].get('name')}。")
+
+
+def _hierarchy_select(items, label):
+    """Let the user pick one item from a list; auto-pick if only one."""
+    if not items:
+        return None
+    if len(items) == 1:
+        return items[0]
+    for i, item in enumerate(items, start=1):
+        print(f"  [{i}] {item}")
+    choice = input(f"选择{label}编号（0 取消）：").strip()
+    if choice == "0":
+        return None
+    try:
+        return items[int(choice) - 1]
+    except (ValueError, IndexError):
+        print("无效选择。")
+        return None
+
+
+def _choose_latest_base_template(template_name):
+    """Return a source template path: active if present, else latest archive."""
+    active = template_importer.get_active_template_path(template_name)
+    if active:
+        print(f"使用当前激活模板：{active}")
+        return active
+
+    by_day = template_importer.list_archives_by_day(template_name)
+    if not by_day:
+        print("未找到可用最新模板，将从导入文件直接创建。")
+        return None
+
+    latest_date, archives = by_day[0]
+    if len(archives) == 1:
+        print(f"使用 {latest_date} 的最新归档：{archives[0]['stamp']}")
+        return archives[0]["path"]
+
+    print(f"{latest_date} 存在多个归档，请选择：")
+    for i, a in enumerate(archives, start=1):
+        print(f"  [{i}] {a['stamp']}")
+    choice = input("选择归档编号（0 取消）：").strip()
+    if choice == "0":
+        return None
+    try:
+        return archives[int(choice) - 1]["path"]
+    except (ValueError, IndexError):
+        print("无效选择。")
+        return None
+
+
+def _browse_archive_history(template_name):
+    """Hierarchical archive browser: template_name -> year -> month -> day -> stamp."""
+    names = template_importer.list_template_names_in_archive()
+    if not names:
+        print("归档为空。")
+        return None
+
+    print("历史归档模板：")
+    selected_name = _hierarchy_select(names, "模板")
+    if not selected_name:
+        return None
+
+    base = os.path.join(config.TEMPLATE_ARCHIVE_DIR, selected_name)
+    years = sorted(
+        (d for d in os.listdir(base)
+         if os.path.isdir(os.path.join(base, d)) and re.match(r"^\d{4}$", d)),
+        reverse=True,
+    )
+    year = _hierarchy_select(years, "年份")
+    if not year:
+        return None
+
+    months = sorted(
+        (d for d in os.listdir(os.path.join(base, year))
+         if os.path.isdir(os.path.join(base, year, d)) and re.match(r"^\d{2}$", d)),
+        reverse=True,
+    )
+    month = _hierarchy_select(months, "月份")
+    if not month:
+        return None
+
+    days = sorted(
+        (d for d in os.listdir(os.path.join(base, year, month))
+         if os.path.isdir(os.path.join(base, year, month, d)) and re.match(r"^\d{2}$", d)),
+        reverse=True,
+    )
+    day = _hierarchy_select(days, "日期")
+    if not day:
+        return None
+
+    stamps = sorted(
+        (d for d in os.listdir(os.path.join(base, year, month, day))
+         if os.path.isdir(os.path.join(base, year, month, day, d)) and re.match(r"^\d{6}$", d)),
+        reverse=True,
+    )
+    stamp = _hierarchy_select(stamps, "时间")
+    if not stamp:
+        return None
+
+    return os.path.join(base, year, month, day, stamp)
 
 
 def _import_template_flow():
@@ -270,60 +371,83 @@ def _import_template_flow():
     try:
         changes = template_importer.detect_changes()
     except Exception as e:
-        print(f"❌ Could not scan import folder: {e}")
+        print(f"❌ 无法扫描导入文件夹：{e}")
         return
 
     if not changes:
-        print("No new template files detected in templates/import/.")
+        print("未检测到新模板文件。")
         return
 
-    print(f"Found {len(changes)} new/updated file(s):")
+    print(f"发现 {len(changes)} 个新/已更新文件：")
     for i, cand in enumerate(changes, start=1):
         print(f"  [{i}] {cand.filename}")
 
     choice = _prompt_with_hint(
-        "Select file number (or 0 to cancel): ",
-        "Enter the number of the file you want to import"
+        "请选择文件编号（0 取消）：",
+        "输入要导入的文件编号"
     ).strip()
     if choice == "0":
-        print("Cancelled.")
+        print("已取消。")
         return
     try:
         idx = int(choice) - 1
         if idx < 0 or idx >= len(changes):
-            print("Invalid selection.")
+            print("无效选择。")
             return
     except ValueError:
-        print("Invalid input.")
+        print("无效输入。")
         return
 
     candidate = changes[idx]
     default_name = template_importer._template_name_from_filename(candidate.filename)
-    print(f"Inferred template name: {default_name}")
+    print(f"从文件名推断模板：{default_name}")
     name_input = _prompt_with_hint(
-        "Enter template name to import into: ",
-        "[Enter] Use inferred template name"
+        "输入模板名（直接回车使用默认值）：",
+        "[Enter] 使用默认模板名"
     ).strip()
     template_name = name_input or default_name
 
     has_work, reason = template_importer.has_unfinished_work(template_name)
     if has_work:
-        print(f"\n⚠️ Warning: current template has unfinished work: {reason}")
+        print(f"\n⚠️ 警告：当前模板有未完成任务：{reason}")
         force = _prompt_with_hint(
-            "Continue? (y/N): ",
-            "Importing will archive the current template"
+            "是否继续？ (y/N): ",
+            "导入将归档当前模板"
         ).strip().lower()
         if force != "y":
-            print("Cancelled.")
+            print("已取消。")
             return
 
+    # Source template selection
+    source_path = None
+    while True:
+        source_choice = _prompt_with_hint(
+            "请选择源模板：",
+            "[L] 使用最新/基础模板  [B] 浏览历史归档  [Q] 取消"
+        ).strip().lower()
+        if source_choice in ("l",):
+            source_path = _choose_latest_base_template(template_name)
+            break
+        elif source_choice in ("b",):
+            source_path = _browse_archive_history(template_name)
+            if source_path:
+                break
+            print("未选择归档模板，请重新选择源模板。")
+        elif source_choice in ("q", "quit"):
+            print("已取消。")
+            return
+        else:
+            print("无效选择。")
+
     try:
-        result = template_importer.activate_template(template_name, candidate.path, force=True)
-        print(f"✅ Imported as '{result['template_name']}' ({result['source_language']}).")
-        print(f"   Archived old template to: {result['archive_path']}")
+        result = template_importer.activate_template(
+            template_name, candidate.path, source_template_path=source_path, force=True
+        )
+        print(f"✅ 已导入为 '{result['template_name']}' ({result['source_language']})。")
+        print(f"   旧模板已归档至：{result['archive_path']}")
         template_importer.save_import_state()
     except Exception as e:
-        print(f"❌ Import failed: {e}")
+        print(f"❌ 导入失败：{e}")
         return
 
     # Preview and confirm immediately after import
@@ -334,7 +458,7 @@ def _confirm_template_flow():
     """Preview active templates and confirm/reset the confirmation flag."""
     templates = template_engine.list_templates()
     if not templates:
-        print("No active templates to confirm. Please import a template first.")
+        print("没有激活模板可供确认。请先导入模板。")
         return
 
     for name in templates:
@@ -342,106 +466,121 @@ def _confirm_template_flow():
             preview_html = template_importer.build_preview_html(name)
             from email_agent.preview import _open_html
             preview_path = _open_html(preview_html)
-            print(f"🌐 Browser preview opened for '{name}': {preview_path}")
+            print(f"🌐 已打开模板 '{name}' 的浏览器预览：{preview_path}")
         except Exception as e:
-            print(f"⚠️ Could not open preview for '{name}': {e}")
+            print(f"⚠️ 无法打开模板 '{name}' 的预览：{e}")
 
     if config.is_template_confirmed():
         reset = _prompt_with_hint(
-            "Reset confirmation and require re-confirmation? (y/N): ",
-            "[y] Reset confirmation  [Enter/N] Keep current confirmation"
+            "是否重置确认状态并要求重新确认？ (y/N): ",
+            "[y] 重置确认  [Enter/N] 保持当前确认"
         ).strip().lower()
         if reset == "y":
             settings = data_store.load_settings()
             settings["template_confirmed"] = False
             settings["template_confirmed_at"] = None
             data_store.save_settings(settings)
-            print("Confirmation reset. Please review and confirm below.")
+            print("确认状态已重置。请在下方的预览后重新确认。")
         else:
             return
 
     confirm = _prompt_with_hint(
-        "Confirm this template for generation/sending? (Y/n): ",
-        "[Y] Confirm  [n] Leave unconfirmed"
+        "确认将此模板用于生成/发送？ (Y/n): ",
+        "[Y] 确认  [n] 保持未确认"
     ).strip().lower()
     if confirm in ("y", "yes"):
         template_importer.confirm_active_template()
-        print("✅ Template confirmed.")
+        print("✅ 模板已确认。")
     else:
-        print("Template remains unconfirmed. Generation and sending are blocked.")
+        print("模板保持未确认。生成和发送已被阻断。")
 
 
 def menu_manage_archives():
-    """List and delete archived templates organized by YYYY/MM/DD."""
-    print("\n[Manage Template Archives]")
+    """List and delete archived templates organized by template_name/YYYY/MM/DD."""
+    print("\n[管理模板归档]")
     archives = template_importer.list_archive_folders()
     if not archives:
-        print("No archived templates found.")
+        print("未找到模板归档。")
         return
 
-    print(f"Found {len(archives)} archive(s):\n")
+    print(f"发现 {len(archives)} 个归档：\n")
     for i, entry in enumerate(archives, start=1):
         print(f"  [{i}] {entry['date']} - {entry['name']}")
 
     choice = _prompt_with_hint(
-        'Enter number to delete, "all" to clear everything, or 0 to cancel: ',
-        'Enter a number, "all", or 0'
+        '请输入编号、"all" 或 0：',
+        '输入编号删除，"all" 清空全部，0 取消'
     ).strip()
     if choice == "0":
-        print("Cancelled.")
+        print("已取消。")
         return
 
     if choice.lower() == "all":
         confirm = _prompt_with_hint(
-            "Confirm delete ALL archives? (Y/n): ",
-            "[Y] Delete all archives  [n] Cancel"
+            "确认删除全部归档？ (Y/n): ",
+            "[Y] 删除全部归档  [n] 取消"
         ).strip().lower()
         if confirm in ("y", "yes"):
             for entry in archives:
                 template_importer.delete_archive_entry(entry["path"])
-            print("✅ All archives deleted.")
+            print("✅ 已全部删除归档。")
         else:
-            print("Cancelled.")
+            print("已取消。")
         return
 
     try:
         idx = int(choice)
         if idx < 1 or idx > len(archives):
-            print("Invalid number.")
+            print("无效编号。")
             return
     except ValueError:
-        print("Invalid input.")
+        print("无效输入。")
         return
 
     target = archives[idx - 1]
     confirm = _prompt_with_hint(
-        f"Confirm delete archive #{idx} ({target['date']} - {target['name']})? (Y/n): ",
-        "[Y] Delete this archive  [n] Cancel"
+        f"确认删除归档 #{idx}（{target['date']} - {target['name']}）? (Y/n): ",
+        "[Y] 删除此归档  [n] 取消"
     ).strip().lower()
     if confirm in ("y", "yes"):
         template_importer.delete_archive_entry(target["path"])
-        print("✅ Archive deleted.")
+        print("✅ 归档已删除。")
     else:
-        print("Cancelled.")
+        print("已取消。")
 
 
 def menu_import_template():
-    print("\n[Import / Confirm Template]")
+    print("\n[导入 / 确认模板]")
+
+    # Detect stale import state when active templates are gone
+    if template_importer.is_import_state_stale():
+        print("检测到导入状态已过期：templates/email/ 为空，但 templates/import/ 中仍有已记录的文件。")
+        reset = _prompt_with_hint(
+            "是否重置导入状态并重新导入现有文件？ (Y/n): ",
+            "[Y] 重置并继续  [n] 取消"
+        ).strip().lower()
+        if reset in ("y", "yes"):
+            template_importer.reset_import_state()
+            print("导入状态已重置。")
+        else:
+            print("已取消。")
+            return
+
     while True:
         templates = template_engine.list_templates()
-        print("\nCurrent active templates:")
+        print("\n当前激活模板：")
         if templates:
             for name in templates:
                 langs = template_engine.list_template_languages(name)
                 print(f"  - {name}: {', '.join(langs)}")
         else:
-            print("  (none)")
+            print("  （无）")
 
         confirmed = config.is_template_confirmed()
-        print(f"\nTemplate confirmed: {'Yes' if confirmed else 'No'}")
+        print(f"\n模板已确认：{'是' if confirmed else '否'}")
 
         if confirmed and not templates:
-            print("⚠️ Template confirmed but no active templates found. Resetting confirmation.")
+            print("⚠️ 模板已确认但未找到激活模板，正在重置确认状态。")
             settings = data_store.load_settings()
             settings["template_confirmed"] = False
             settings["template_confirmed_at"] = None
@@ -449,98 +588,101 @@ def menu_import_template():
             confirmed = False
 
         choice = _prompt_with_hint(
-            "Select option: ",
-            "[I] Import new file  [M] Manage archives  [C] Confirm/reset  [Q] Quit"
+            "请选择：",
+            "[I] 导入新文件  [M] 管理归档  [R] 重置导入状态  [C] 确认/重置  [Q] 返回"
         ).strip().lower()
 
         if choice in ("i", "import"):
             _import_template_flow()
         elif choice in ("m", "manage"):
             menu_manage_archives()
+        elif choice in ("r", "reset"):
+            template_importer.reset_import_state()
+            print("导入状态已重置。请重新选择导入。")
         elif choice in ("c", "confirm"):
             _confirm_template_flow()
         elif choice in ("q", "quit"):
-            print("Returning to main menu.")
+            print("返回主菜单。")
             break
         else:
-            print("Invalid choice.")
+            print("无效选择。")
 
 
 def menu_toggle_skill():
-    print("\n[Toggle Skill Mode]")
-    print(f"Current mode: {config.SKILL_MODE}")
-    print("  full    - Use the complete email_writing_skill.md (slower, more detailed)")
-    print("  concise - Use the concise version (faster, ~50 lines)")
+    print("\n[切换 skill 模式]")
+    print(f"当前模式：{config.SKILL_MODE}")
+    print("  full    - 使用完整版 email_writing_skill.md（较慢、更详细）")
+    print("  concise - 使用精简版（更快，约 50 行）")
     new_mode = _prompt_with_hint(
-        "Enter mode (full/concise) or press Enter to keep current: ",
-        "[full] Complete skill  [concise] Concise skill  [Enter] Keep current"
+        "输入模式（full/concise）或按 Enter 保持当前：",
+        "[full] 完整 skill  [concise] 精简 skill  [Enter] 保持当前"
     ).strip().lower()
     if not new_mode:
-        print("No change.")
+        print("无变化。")
         return
     if new_mode not in ("full", "concise"):
-        print("Invalid mode. Must be 'full' or 'concise'.")
+        print("无效模式，必须是 'full' 或 'concise'。")
         return
     settings = data_store.load_settings()
     settings["skill_mode"] = new_mode
     data_store.save_settings(settings)
     config.SKILL_MODE = new_mode
-    print(f"✅ Skill mode switched to '{new_mode}'. This will be remembered for next runs.")
+    print(f"✅ Skill 模式已切换为 '{new_mode}'。下次启动仍有效。")
 
 
 def menu_delete_drafts():
-    print("\n[Delete Drafts]")
+    print("\n[删除草稿]")
     drafts = data_store.load_drafts()
     if not drafts:
-        print("No drafts to delete.")
+        print("没有草稿可删除。")
         return
 
-    print(f"Found {len(drafts)} draft(s):\n")
+    print(f"发现 {len(drafts)} 封草稿：\n")
     for i, draft in enumerate(drafts, start=1):
         name = draft.get("customer_id", "?")
-        subject = draft.get("subject", "(no subject)")
+        subject = draft.get("subject", "(无主题)")
         print(f"  [{i}] {name} - {subject}")
 
     choice = _prompt_with_hint(
-        '\nEnter number to delete, "all" to clear everything, or 0 to cancel: ',
-        'Enter a draft number, "all", or 0'
+        '\n请输入编号、"all" 或 0：',
+        '输入编号删除，"all" 清空全部，0 取消'
     ).strip()
     if choice == "0":
-        print("Cancelled.")
+        print("已取消。")
         return
 
     if choice.lower() == "all":
         confirm = _prompt_with_hint(
-            "Confirm delete ALL drafts? (Y/n): ",
-            "[Y] Delete all drafts  [n] Cancel"
+            "确认删除全部草稿？ (Y/n): ",
+            "[Y] 删除全部草稿  [n] 取消"
         ).strip().lower()
         if confirm in ("y", "yes"):
             data_store.clear_drafts()
             data_store.clear_generation_state()
-            print("✅ All drafts deleted. Generation state reset.")
+            print("✅ 全部草稿已删除。生成状态已重置。")
         else:
-            print("Cancelled.")
+            print("已取消。")
         return
 
     try:
         idx = int(choice)
         if idx < 1 or idx > len(drafts):
-            print("Invalid number.")
+            print("无效编号。")
             return
     except ValueError:
-        print("Invalid input.")
+        print("无效输入。")
         return
 
     target = drafts[idx - 1]
     confirm = _prompt_with_hint(
-        f"Confirm delete draft #{idx} ({target.get('subject', '')})? (Y/n): ",
-        "[Y] Delete this draft  [n] Cancel"
+        f"确认删除草稿 #{idx}（{target.get('subject', '')}）? (Y/n): ",
+        "[Y] 删除此草稿  [n] 取消"
     ).strip().lower()
     if confirm in ("y", "yes"):
         data_store.delete_draft(target.get("draft_id"))
-        print("✅ Draft deleted.")
+        print("✅ 草稿已删除。")
     else:
-        print("Cancelled.")
+        print("已取消。")
 
 
 def run():
@@ -549,8 +691,8 @@ def run():
         _print_header()
         _print_menu()
         choice = _prompt_with_hint(
-            "Select an option: ",
-            "[1] Generate  [2] Review  [3] Send  [4] Replies  [5] Logs  [6] Config  [7] Model  [8] Template  [9] Skill  [D] Delete  [0] Exit"
+            "请选择操作：",
+            "[1]生成 [2]审核 [3]发送 [4]回复 [5]日志 [6]配置 [7]模型 [8]模板 [9]Skill [D]删除 [0]退出"
         ).strip()
 
         if choice == "1":
@@ -584,10 +726,10 @@ def run():
             menu_delete_drafts()
             _wait_for_enter()
         elif choice == "0":
-            print("\nGoodbye! 👋")
+            print("\n再见！👋")
             sys.exit(0)
         else:
-            print("Invalid option. Please try again.")
+            print("无效选项，请重试。")
             _wait_for_enter()
 
 
