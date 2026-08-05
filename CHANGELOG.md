@@ -2,6 +2,21 @@
 
 ## 2026-08-05
 
+### TASK-9: 端到端验证
+
+- **修改文件**：无代码修改，仅验证
+- **核心逻辑**：
+  - `python3 -m py_compile main.py email_agent/*.py scripts/*.py` 全量语法检查通过；
+  - `python3 main.py --init` 初始化成功；
+  - 模块冒烟测试通过：加载 sender_profile、customers、template 列表、template_engine.render() 本地替换、interaction_analyzer.analyze() 规则判定；
+  - `email_generator.generate_all()` 在无 LLM 调用情况下生成 3 封草稿，`rendered_by: "local"`；
+  - `preview.open_draft_preview()` 成功处理预览（ headed 或系统浏览器回退）；
+  - 测试草稿与生成状态已清理，未污染用户数据。
+- **潜在风险**：
+  - 完整交互流程（菜单 6 导入 → 确认 → 菜单 1 生成 → 菜单 2 审核 → 菜单 3 发送）需在真实交互式终端中由用户运行，当前后台会话无法执行 `input()` 菜单；
+  - 发送真实邮件前请确认 `ALLOWED_TEST_EMAILS` 已包含测试收件箱。
+- **下一步建议**：在本地交互式终端运行 `source .venv/bin/activate && python main.py`，依次执行菜单 6 → 1 → 2 → 3 完成全流程验证。
+
 ### TASK-8: 文档更新
 
 - **修改文件**：`README.md`、`docs/CONFIG_GUIDE.md`
