@@ -17,9 +17,14 @@ def _detect_language(location):
         return "cn"
     if "(英文)" in loc or "(english)" in loc:
         return "en"
-    if any(k in loc for k in ("中国", "大陆", "北京", "上海", "广州", "深圳", "成都", "杭州")):
+    mainland_cities = (
+        "中国", "大陆", "北京", "上海", "广州", "深圳", "成都", "杭州",
+        "beijing", "shanghai", "guangzhou", "shenzhen", "chengdu", "hangzhou",
+        "nanjing", "wuhan", "xian", "xi'an", "chongqing", "tianjin", "suzhou",
+    )
+    if any(k in loc for k in mainland_cities):
         return "cn"
-    if any(k in loc for k in ("香港", "台湾", "hong kong", "taiwan")):
+    if any(k in loc for k in ("香港", "台湾", "hong kong", "taiwan", "macau", "澳门")):
         return "en"
     return "en"
 

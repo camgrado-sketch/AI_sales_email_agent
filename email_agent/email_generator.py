@@ -19,7 +19,7 @@ def _current_date(language="cn"):
     return now.strftime("%B %d, %Y")
 
 
-def _build_variables(customer, template_config):
+def _build_variables(customer, template_config, language="cn"):
     """Build a variables dict from sender profile and customer record.
 
     All keys are uppercase so they match the {{VAR}} placeholders in templates.
@@ -44,7 +44,7 @@ def _build_variables(customer, template_config):
         "CUSTOMER_LOCATION": customer.get("location", ""),
         "CUSTOMER_INDUSTRY": customer.get("industry", ""),
         # Derived/static
-        "CURRENT_DATE": _current_date(language="cn"),
+        "CURRENT_DATE": _current_date(language=language),
     }
 
     # Include any variables declared in config.yaml that have a direct customer key
@@ -110,9 +110,7 @@ def generate_for_customer(customer, language=None):
             raise RuntimeError("没有可用的激活模板，请先到菜单 6 导入/确认模板。")
 
     template_config = template_engine.get_template_config(template_name)
-    variables = _build_variables(customer, template_config)
-    # Update CURRENT_DATE to match the chosen language
-    variables["CURRENT_DATE"] = _current_date(language=chosen_language)
+    variables = _build_variables(customer, template_config, language=chosen_language)
 
     html_body, images, files = template_engine.render(
         template_name, variables, language=chosen_language
