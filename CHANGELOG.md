@@ -2,6 +2,22 @@
 
 ## 2026-08-05
 
+### Bug Report 修复（feature/local-template-replace 黑盒测试）
+
+- **修改文件**：`email_agent/cli_controller.py`、`email_agent/config.py`、`email_agent/email_generator.py`、`email_agent/interaction_analyzer.py`、`templates/email/initial_contact/config.yaml`、`templates/email/follow_up/config.yaml`、`templates/email/final_note/config.yaml`、`CLAUDE.md`
+- **核心逻辑**：
+  - 在设置菜单新增 `[5] 选择生效模板`，将 `selected_template` 持久化到 `data/settings.json`；生成草稿时优先使用用户选择的模板，未选择时仍按销售阶段自动匹配；
+  - 重构模板确认流程：多模板场景下列出可选模板，支持确认单个模板并一键设为生效模板，避免只能全局确认所有模板；
+  - 修复变量命名空间不一致：`email_generator._build_variables()` 增加别名映射（`COMPANY_NAME` → `CUSTOMER_COMPANY`、`MARKET_REGION` → `SENDER_MARKET_REGION` 等），兼容外部导入模板中的非标准占位符；
+  - 修复语言判定漏洞：`interaction_analyzer._detect_language()` 增加拼音城市名支持（Shanghai、Beijing、Guangzhou 等）；移除 `email_generator._build_variables()` 中 `CURRENT_DATE` 初始硬编码中文的隐患；
+  - 补充 `subject_template`：为 `initial_contact`、`follow_up`、`final_note` 三个旧模板写入默认主题模板；`email_generator._render_subject()` 增加空主题兜底，避免草稿无主题；
+  - 更新 `CLAUDE.md`，补充全局指令引用、仓库级架构、常用命令，并重点明确 `main` 与 `feature/local-template-replace` 分支分工及独立分支开发规范。
+- **潜在风险**：
+  - `selected_template` 会覆盖阶段自动匹配，用户忘记恢复自动选择时所有客户都使用同一模板；
+  - 变量别名目前覆盖最常见的非标准占位符，若外部模板使用其他命名，可能仍需扩展别名表；
+  - 模板确认流程改为单模板确认后，批量导入多个模板时需要逐条确认。
+- **下一步建议**：在本地交互式终端运行 `source .venv/bin/activate && python main.py`，依次验证菜单 `S` → `5` 选择模板、菜单 `6` 确认单个模板并设为生效、菜单 `1` 生成草稿主题与语言正确。
+
 ### TASK-9: 端到端验证
 
 - **修改文件**：无代码修改，仅验证
