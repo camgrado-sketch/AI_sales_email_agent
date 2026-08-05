@@ -2,6 +2,19 @@
 
 ## 2026-08-05
 
+### TASK-2: 模板引擎扩展
+
+- **修改文件**：`email_agent/template_engine.py`、`email_agent/config.py`
+- **核心逻辑**：
+  - `template_engine.render()` 现在返回三元组 `(html_body, images, files)`；
+  - 新增 `{{FILE:name}}` 占位符支持，在 `assets/files/` 中匹配文件并渲染为本地 `file://` 下载链接；
+  - 变量 dict 键统一归一化为大写，占位符匹配改为大写下划线风格（`{{SENDER_NAME}}`、`{{CUSTOMER_FIRST_NAME}}` 等）；
+  - `config.py` 新增 `FILES_DIR` 路径常量。
+- **潜在风险**：
+  - 旧模板中的小写占位符（如 `{{sender_name}}`）将不会被替换，需要通过导入流程重新生成模板；
+  - `file://` 链接对邮件收件人不可访问，后续需在 CONFIG_GUIDE 中说明应替换为公网 URL 或改用附件。
+- **下一步建议**：实现 `email_agent/sender_profile_editor.py` 与发送者信息编辑。
+
 ### TASK-1: 模板导入 LLM 结构化
 
 - **修改文件**：`email_agent/template_importer.py`、`email_agent/config.py`、`prompts/template_import_prompt.md`

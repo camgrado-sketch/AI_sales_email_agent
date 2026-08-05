@@ -73,6 +73,7 @@ TEMPLATE_IMPORT_DIR = os.path.join(BASE_DIR, "templates", "import")
 TEMPLATE_ARCHIVE_DIR = os.path.join(BASE_DIR, "templates", "archive")
 ASSETS_DIR = os.path.join(BASE_DIR, "assets")
 IMAGES_DIR = os.path.join(ASSETS_DIR, "images")
+FILES_DIR = os.path.join(ASSETS_DIR, "files")
 
 PROMPTS_DIR = os.path.join(BASE_DIR, "prompts")
 SKILLS_DIR = os.path.join(BASE_DIR, "skills")

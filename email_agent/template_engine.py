@@ -70,21 +70,49 @@ def _find_image_file(image_name):
     return None
 
 
+def _find_file(file_name):
+    """Search for a file by base name under assets/files."""
+    if not os.path.exists(config.FILES_DIR):
+        return None
+    # Common file extensions; also try exact name first.
+    candidates = [file_name]
+    base, ext = os.path.splitext(file_name)
+    if not ext:
+        candidates.extend(
+            [f"{file_name}{e}" for e in (".pdf", ".docx", ".doc", ".xlsx", ".xls", ".zip", ".txt")]
+        )
+    for candidate in candidates:
+        path = os.path.join(config.FILES_DIR, candidate)
+        if os.path.exists(path):
+            return path
+    return None
+
+
+def _normalize_variables(variables):
+    """Normalize variable dict keys to uppercase for consistent placeholder matching."""
+    normalized = {}
+    for key, value in variables.items():
+        normalized[str(key).strip().upper()] = value
+    return normalized
+
+
 def render(template_name, variables, language=None):
     """
     Render an HTML email template.
 
     Args:
         template_name: Name of the template directory under templates/email.
-        variables: Dict of placeholder values.
+        variables: Dict of placeholder values. Keys are normalized to uppercase.
         language: Optional language code to select template_<lang>.html.
 
     Returns:
-        Tuple of (html_body, images) where images is a list of dicts with
-        'cid' and 'path' keys for inline image attachments.
+        Tuple of (html_body, images, files) where images/files are lists of dicts
+        with metadata for inline attachments or download links.
     """
     html = _load_template_html(template_name, language)
+    variables = _normalize_variables(variables)
     images = []
+    files = []
 
     # Replace image placeholders: {{IMAGE:name}}
     def replace_image(match):
@@ -99,16 +127,36 @@ def render(template_name, variables, language=None):
 
     html = re.sub(r"\{\{IMAGE:([^}]+)\}\}", replace_image, html)
 
+    # Replace file placeholders: {{FILE:name}}
+    def replace_file(match):
+        file_name = match.group(1).strip()
+        file_path = _find_file(file_name)
+        if file_path:
+            files.append({"name": file_name, "path": file_path})
+            # Render as a local download link. In production the user should replace
+            # the file:// URL with a publicly accessible URL or use SMTP attachments.
+            abs_path = os.path.abspath(file_path)
+            display_name = os.path.basename(file_path)
+            return (
+                f'<a href="file://{abs_path}" style="color:#0d6efd;">'
+                f'📎 {display_name}'
+                f'</a>'
+            )
+        else:
+            return f"<!-- Missing file asset: {file_name} -->"
+
+    html = re.sub(r"\{\{FILE:([^}]+)\}\}", replace_file, html)
+
     # Replace simple variables: {{var}}
     def replace_var(match):
-        var_name = match.group(1).strip()
+        var_name = match.group(1).strip().upper()
         if var_name in variables:
             return str(variables[var_name])
         return match.group(0)
 
     html = re.sub(r"\{\{([^{}:]+)\}\}", replace_var, html)
 
-    return html, images
+    return html, images, files
 
 
 def template_for_stage(stage):
