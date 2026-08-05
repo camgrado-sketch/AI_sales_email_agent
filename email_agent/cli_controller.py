@@ -32,7 +32,8 @@ def _print_menu():
 
 
 def _wait_for_enter():
-    input("\nPress Enter to return to the menu...")
+    print("\n[Enter] Return to main menu")
+    input("Press Enter to return to the menu...")
 
 
 def _active_templates_exist():
@@ -123,7 +124,10 @@ def menu_review():
                 print("Skipped.")
                 break
             elif choice in ("e", "edit"):
-                new_body = input("Enter updated text body (or press Enter to keep): ").strip()
+                new_body = _prompt_with_hint(
+                    "Enter updated text body: ",
+                    "[Enter] Keep current body"
+                ).strip()
                 if new_body:
                     draft["text_body"] = new_body
                     all_drafts = data_store.load_drafts()
@@ -296,7 +300,10 @@ def _import_template_flow():
     candidate = changes[idx]
     default_name = template_importer._template_name_from_filename(candidate.filename)
     print(f"Inferred template name: {default_name}")
-    name_input = input("Enter template name to import into (or press Enter to use inferred): ").strip()
+    name_input = _prompt_with_hint(
+        "Enter template name to import into: ",
+        "[Enter] Use inferred template name"
+    ).strip()
     template_name = name_input or default_name
 
     has_work, reason = template_importer.has_unfinished_work(template_name)
@@ -541,7 +548,10 @@ def run():
         _clear_screen()
         _print_header()
         _print_menu()
-        choice = input("Select an option: ").strip()
+        choice = _prompt_with_hint(
+            "Select an option: ",
+            "[1] Generate  [2] Review  [3] Send  [4] Replies  [5] Logs  [6] Config  [7] Model  [8] Template  [9] Skill  [D] Delete  [0] Exit"
+        ).strip()
 
         if choice == "1":
             menu_generate()
