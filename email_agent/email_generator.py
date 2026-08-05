@@ -59,6 +59,24 @@ def _build_variables(customer, template_config, language="cn"):
             else:
                 variables[key] = ""
 
+    # Alias mapping: common user-facing placeholder names -> canonical system names.
+    # This lets templates imported from external sources use {{company_name}},
+    # {{market_region}}, etc., and still resolve correctly.
+    aliases = {
+        "NAME": "CUSTOMER_NAME",
+        "FIRST_NAME": "CUSTOMER_FIRST_NAME",
+        "COMPANY": "CUSTOMER_COMPANY",
+        "COMPANY_NAME": "CUSTOMER_COMPANY",
+        "POSITION": "CUSTOMER_POSITION",
+        "LOCATION": "CUSTOMER_LOCATION",
+        "INDUSTRY": "CUSTOMER_INDUSTRY",
+        "SENDER_COMPANY_NAME": "SENDER_COMPANY",
+        "MARKET_REGION": "SENDER_MARKET_REGION",
+    }
+    for alias, canonical in aliases.items():
+        if alias not in variables and canonical in variables:
+            variables[alias] = variables[canonical]
+
     return variables
 
 
