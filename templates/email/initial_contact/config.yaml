@@ -8,6 +8,7 @@ customer_type:
   - fit_out_company
 recommended_stage:
   - new_lead
+subject_template: 'Furniture partnership opportunity for {{CUSTOMER_COMPANY}} | GRADO Contract'
 variables:
   - customer_first_name
   - sender_name

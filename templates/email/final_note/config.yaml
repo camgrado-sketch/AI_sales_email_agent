@@ -8,6 +8,7 @@ customer_type:
   - fit_out_company
 recommended_stage:
   - follow_up_no_reply
+subject_template: 'One last note about GRADO Contract and {{CUSTOMER_COMPANY}}'
 variables:
   - customer_first_name
   - credible_proof

@@ -166,12 +166,12 @@ def _render_subject(template_config, variables):
     """Render the subject line template with variables.
 
     If config.yaml contains a 'subject_template' key, use it; otherwise fall back
-    to a generic subject. The importer writes the LLM-generated subject into the
-    config for traceability.
+    to a generic subject so drafts are never sent with an empty subject.
     """
-    subject_template = template_config.get("subject_template", "")
+    subject_template = template_config.get("subject_template", "").strip()
     if not subject_template:
-        return ""
+        company = variables.get("CUSTOMER_COMPANY", "")
+        return f"Furniture partnership opportunity for {company} | GRADO Contract" if company else "GRADO Contract Partnership Opportunity"
 
     def replace_var(match):
         var_name = match.group(1).strip().upper()

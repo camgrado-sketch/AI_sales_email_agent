@@ -8,6 +8,7 @@ customer_type:
   - fit_out_company
 recommended_stage:
   - contacted_no_reply
+subject_template: 'Following up: GRADO Contract for {{CUSTOMER_COMPANY}}'
 variables:
   - customer_first_name
   - company_name
