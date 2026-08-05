@@ -6,9 +6,8 @@ import shlex
 import shutil
 import subprocess
 import tempfile
-import webbrowser
 
-from email_agent import config, data_store
+from email_agent import config, data_store, template_importer
 
 
 def _guess_mime(path):
@@ -52,10 +51,7 @@ def _is_wsl():
 
 
 def _open_with_browser_command(cmd, path):
-    """Open path with a user-configured browser command.
-
-    Supports the standard `%s` placeholder or appends the path to the command.
-    """
+    """Open path with a user-configured browser command."""
     try:
         if "%s" in cmd:
             full_cmd = cmd.replace("%s", path)
@@ -99,8 +95,8 @@ def _copy_to_latest_preview(path):
         return None
 
 
-def _open_html(html, suffix=".html"):
-    """Write HTML to a temp file and open it in the default browser."""
+def _write_temp_html(html, suffix=".html"):
+    """Write HTML to a temp file and return the path."""
     fd, path = tempfile.mkstemp(suffix=suffix, prefix="email_agent_", text=True)
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
@@ -108,6 +104,43 @@ def _open_html(html, suffix=".html"):
     except Exception:
         os.close(fd)
         raise
+    return path
+
+
+def _open_with_playwright(path, headless=False):
+    """Try to open the file URL using Playwright Chromium."""
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError:
+        return False
+
+    try:
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=headless)
+            page = browser.new_page()
+            page.goto(f"file://{path}")
+            if headless:
+                screenshot_path = os.path.join(config.DATA_DIR, "latest_preview.png")
+                os.makedirs(config.DATA_DIR, exist_ok=True)
+                page.screenshot(path=screenshot_path, full_page=True)
+                print(f"📸 已生成 PNG 预览：{screenshot_path}")
+            # Keep the browser open in headed mode until the user closes it.
+            # In headless mode we close immediately after screenshot.
+            if not headless:
+                input("\n[Enter] 关闭浏览器预览并继续...")
+            browser.close()
+        return True
+    except Exception as e:
+        if headless:
+            print(f"⚠️ Playwright headless 截图失败：{e}")
+        else:
+            print(f"⚠️ Playwright headed 启动失败（可能无桌面环境）：{e}")
+        return False
+
+
+def _open_with_system_browser(path):
+    """Fallback to the system default browser or BROWSER env command."""
+    import webbrowser
 
     opened = False
     browser_cmd = (config.BROWSER or os.environ.get("BROWSER", "")).strip()
@@ -124,13 +157,33 @@ def _open_html(html, suffix=".html"):
     if not opened and _is_wsl():
         opened = _open_wsl_browser(path)
 
-    if not opened:
-        latest = _copy_to_latest_preview(path)
-        print("⚠️ No browser detected. Open the preview manually:")
-        print(f"   {path}")
-        if latest:
-            print(f"   Stable copy: {latest}")
+    return opened
 
+
+def _open_html(html, suffix=".html"):
+    """Write HTML to a temp file and open it with Playwright, falling back as needed."""
+    path = _write_temp_html(html, suffix=suffix)
+
+    # Primary: Playwright headed Chromium
+    if _open_with_playwright(path, headless=False):
+        return path
+
+    # Fallback 1: Playwright headless screenshot
+    if _open_with_playwright(path, headless=True):
+        _copy_to_latest_preview(path)
+        print(f"🌐 临时 HTML 文件：{path}")
+        return path
+
+    # Fallback 2: system browser / webbrowser / WSL
+    if _open_with_system_browser(path):
+        return path
+
+    # Final fallback: print paths
+    latest = _copy_to_latest_preview(path)
+    print("⚠️ 无法自动打开预览，请手动打开：")
+    print(f"   {path}")
+    if latest:
+        print(f"   稳定副本：{latest}")
     return path
 
 
@@ -153,13 +206,12 @@ def open_draft_preview(draft):
 
     subject = draft.get("subject", "")
     customer = draft.get("customer_id", "")
-    model = draft.get("model_used", "")
-    meta = draft.get("generation_meta", {})
+    rendered_by = draft.get("rendered_by", "local")
 
     banner = f"""
     <div style="background:#fff3cd;border:1px solid #ffeaa7;padding:12px 16px;border-radius:6px;margin-bottom:24px;font-family:sans-serif;">
       <strong>Draft Preview</strong> — {subject}<br>
-      <small>Customer: {customer} | Model: {model} | Tokens: {meta.get('total_tokens', 0)} | Generated: {meta.get('generation_time', '')}</small>
+      <small>Customer: {customer} | Rendered by: {rendered_by}</small>
     </div>
     """
 
@@ -179,6 +231,12 @@ def open_draft_preview(draft):
 </html>
 """
     return _open_html(full_html, suffix="_draft.html")
+
+
+def open_template_preview(template_name):
+    """Open a browser preview of an active template with placeholders highlighted."""
+    preview_html = template_importer.build_preview_html(template_name)
+    return _open_html(preview_html, suffix="_template.html")
 
 
 def open_replies_preview(replies):

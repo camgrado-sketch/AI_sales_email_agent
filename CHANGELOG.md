@@ -2,6 +2,20 @@
 
 ## 2026-08-05
 
+### TASK-6: Playwright 浏览器预览
+
+- **修改文件**：`email_agent/preview.py`、`requirements.txt`
+- **核心逻辑**：
+  - `preview.py` 主路径改为使用 Playwright Chromium（headed）打开本地临时 HTML；
+  - 无桌面环境时自动回退到 headless PNG 截图（`data/latest_preview.png`）；
+  - 再失败则回退到系统浏览器 / `webbrowser` / WSL 专用命令；
+  - 新增 `open_template_preview(template_name)` 用于模板确认预览；
+  - `requirements.txt` 增加 `playwright` 依赖。
+- **潜在风险**：
+  - 首次运行需要执行 `playwright install chromium` 下载浏览器二进制；
+  - headed 模式在有 GUI 环境下会阻塞终端等待用户关闭浏览器或按 Enter，这是预期行为。
+- **下一步建议**：重构 `cli_controller.py`，实现设置子菜单与发送者信息入口。
+
 ### TASK-5: 互动分析器简化
 
 - **修改文件**：`email_agent/interaction_analyzer.py`
