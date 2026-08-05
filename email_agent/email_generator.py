@@ -101,6 +101,15 @@ def generate_for_customer(customer, language=None):
     template_name = analysis["template_type"]
     chosen_language = language or analysis.get("language", "cn")
 
+    available_templates = template_engine.list_templates()
+    if template_name not in available_templates:
+        if available_templates:
+            fallback = available_templates[0]
+            print(f"⚠️ 推荐模板 '{template_name}' 未激活，回退使用 '{fallback}'")
+            template_name = fallback
+        else:
+            raise RuntimeError("没有可用的激活模板，请先到菜单 8 导入/确认模板。")
+
     template_config = template_engine.get_template_config(template_name)
     schema = _build_variable_schema(template_config)
 

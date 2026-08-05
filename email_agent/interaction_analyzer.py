@@ -27,12 +27,15 @@ def _detect_language(location):
 
 
 def _rule_based_stage(history):
-    """Determine sales stage from email/reply history."""
+    """Determine sales stage from successful email/reply history."""
+    successful_sent = sum(
+        1 for e in history.get("emails", []) if e.get("status") == "success"
+    )
     if history["reply_count"] > 0:
         return "replied"
-    if history["sent_count"] >= 2:
+    if successful_sent >= 2:
         return "follow_up_no_reply"
-    if history["sent_count"] == 1:
+    if successful_sent == 1:
         return "contacted_no_reply"
     return "new_lead"
 
