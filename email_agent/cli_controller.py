@@ -2,7 +2,7 @@ import os
 import re
 import sys
 
-from email_agent import config, data_store, status, template_engine, template_importer
+from email_agent import config, data_store, sender_profile_editor, status, template_engine, template_importer
 
 
 def _clear_screen():
@@ -23,12 +23,20 @@ def _print_menu():
     print("  [3] 发送已审核邮件")
     print("  [4] 检查回复")
     print("  [5] 查看日志")
-    print("  [6] 配置检查")
-    print("  [7] 切换当前模型")
-    print("  [8] 导入 / 确认模板")
-    print("  [9] 切换 skill 模式")
+    print("  [6] 导入 / 确认模板")
+    print("  [S] 设置")
     print("  [D] 删除草稿")
     print("  [0] 退出")
+    print()
+
+
+def _print_settings_menu():
+    print("\n设置菜单：")
+    print("  [1] 发送者信息")
+    print("  [2] 切换当前模型")
+    print("  [3] 切换 skill 模式")
+    print("  [4] 配置检查")
+    print("  [0] 返回主菜单")
     print()
 
 
@@ -58,7 +66,7 @@ def _require_confirmed_template():
         data_store.save_settings(settings)
         confirmed = False
     if not confirmed:
-        print("❌ 没有已确认的模板。请先到菜单 8 导入/确认模板。")
+        print("❌ 没有已确认的模板。请先到菜单 6 导入/确认模板。")
         return False
     return True
 
@@ -67,7 +75,7 @@ def menu_generate():
     print("\n[生成草稿]")
     if not _require_confirmed_template():
         return
-    print("将分析客户并生成个性化邮件草稿。")
+    print("将根据已确认模板生成本地变量替换的邮件草稿。")
     confirm = _prompt_with_hint(
         "是否继续？ (Y/n): ",
         "[Y] 开始生成  [n] 取消"
@@ -99,14 +107,13 @@ def menu_review():
         print(f"客户: {draft.get('customer_id')} <{draft.get('email')}>")
         print(f"模板: {draft.get('template')} | 阶段: {draft.get('stage')} | 语言: {draft.get('language', 'default')}")
         print(f"主题: {draft.get('subject')}")
-        print(f"个性化: {draft.get('personalization_note')}")
-        print(f"模型: {draft.get('model_used')} | Token: {draft.get('generation_meta', {}).get('total_tokens', 0)}")
+        print(f"渲染方式: {draft.get('rendered_by', 'unknown')}")
 
         try:
             preview_path = open_draft_preview(draft)
-            print(f"🌐 已打开浏览器预览：{preview_path}")
+            print(f"🌐 已打开预览：{preview_path}")
         except Exception as e:
-            print(f"⚠️ 无法打开浏览器预览：{e}")
+            print(f"⚠️ 无法打开预览：{e}")
 
         while True:
             choice = _prompt_with_hint(
@@ -165,9 +172,9 @@ def menu_check_replies():
     if replies:
         try:
             preview_path = open_replies_preview(replies)
-            print(f"🌐 已打开浏览器预览：{preview_path}")
+            print(f"🌐 已打开回复预览：{preview_path}")
         except Exception as e:
-            print(f"⚠️ 无法打开浏览器预览：{e}")
+            print(f"⚠️ 无法打开回复预览：{e}")
 
         while True:
             choice = _prompt_with_hint(
@@ -213,14 +220,18 @@ def menu_logs():
 def menu_config():
     print("\n[配置检查]")
     active = config.get_active_model()
+    sender = config.load_sender_profile()
     print(f"邮箱账号：        {config.EMAIL_ACCOUNT or '未设置'}")
     print(f"邮箱密码：        {'已设置' if config.EMAIL_PASSWORD else '未设置'}")
     print(f"当前模型：        {active.get('name') if active else '未设置'} ({active.get('model') if active else ''})")
     print(f"模型地址：        {active.get('base_url') or 'default' if active else ''}")
     print(f"寄件人配置：      {config.SENDER_PROFILE_FILE}")
-    print(f"  姓名：          {config.load_sender_profile().get('sender_name')}")
-    print(f"  职位：          {config.load_sender_profile().get('sender_title')}")
-    print(f"  区域：          {config.load_sender_profile().get('sender_market_region')}")
+    print(f"  姓名：          {sender.get('sender_name')}")
+    print(f"  职位：          {sender.get('sender_title')}")
+    print(f"  公司：          {sender.get('sender_company')}")
+    print(f"  邮箱：          {sender.get('sender_email')}")
+    print(f"  电话：          {sender.get('sender_phone')}")
+    print(f"  区域：          {sender.get('sender_market_region')}")
     print(f"Skill 模式：      {config.SKILL_MODE}")
     print(f"模板已确认：      {config.is_template_confirmed()}")
     print(f"Demo 模式：       {config.DEMO_MODE}")
@@ -230,6 +241,7 @@ def menu_config():
     print(f"草稿文件：        {config.DRAFTS_JSON_FILE}")
     print(f"模板目录：        {config.TEMPLATES_DIR}")
     print(f"图片目录：        {config.IMAGES_DIR}")
+    print(f"文件目录：        {config.FILES_DIR}")
 
 
 def menu_switch_model():
@@ -266,233 +278,58 @@ def menu_switch_model():
     print(f"✅ 已切换到模型 [{idx}] {models[idx].get('name')}。")
 
 
-def _hierarchy_select(items, label):
-    """Let the user pick one item from a list; auto-pick if only one."""
-    if not items:
-        return None
-    if len(items) == 1:
-        return items[0]
-    for i, item in enumerate(items, start=1):
-        print(f"  [{i}] {item}")
-    choice = input(f"选择{label}编号（0 取消）：").strip()
-    if choice == "0":
-        return None
-    try:
-        return items[int(choice) - 1]
-    except (ValueError, IndexError):
-        print("无效选择。")
-        return None
-
-
-def _choose_latest_base_template(template_name):
-    """Return a source template path: active if present, else latest archive."""
-    active = template_importer.get_active_template_path(template_name)
-    if active:
-        print(f"使用当前激活模板：{active}")
-        return active
-
-    by_day = template_importer.list_archives_by_day(template_name)
-    if not by_day:
-        print("未找到可用最新模板，将从导入文件直接创建。")
-        return None
-
-    latest_date, archives = by_day[0]
-    if len(archives) == 1:
-        print(f"使用 {latest_date} 的最新归档：{archives[0]['stamp']}")
-        return archives[0]["path"]
-
-    print(f"{latest_date} 存在多个归档，请选择：")
-    for i, a in enumerate(archives, start=1):
-        print(f"  [{i}] {a['stamp']}")
-    choice = input("选择归档编号（0 取消）：").strip()
-    if choice == "0":
-        return None
-    try:
-        return archives[int(choice) - 1]["path"]
-    except (ValueError, IndexError):
-        print("无效选择。")
-        return None
-
-
-def _browse_archive_history(template_name):
-    """Hierarchical archive browser: template_name -> year -> month -> day -> stamp."""
-    names = template_importer.list_template_names_in_archive()
-    if not names:
-        print("归档为空。")
-        return None
-
-    print("历史归档模板：")
-    selected_name = _hierarchy_select(names, "模板")
-    if not selected_name:
-        return None
-
-    base = os.path.join(config.TEMPLATE_ARCHIVE_DIR, selected_name)
-    years = sorted(
-        (d for d in os.listdir(base)
-         if os.path.isdir(os.path.join(base, d)) and re.match(r"^\d{4}$", d)),
-        reverse=True,
-    )
-    year = _hierarchy_select(years, "年份")
-    if not year:
-        return None
-
-    months = sorted(
-        (d for d in os.listdir(os.path.join(base, year))
-         if os.path.isdir(os.path.join(base, year, d)) and re.match(r"^\d{2}$", d)),
-        reverse=True,
-    )
-    month = _hierarchy_select(months, "月份")
-    if not month:
-        return None
-
-    days = sorted(
-        (d for d in os.listdir(os.path.join(base, year, month))
-         if os.path.isdir(os.path.join(base, year, month, d)) and re.match(r"^\d{2}$", d)),
-        reverse=True,
-    )
-    day = _hierarchy_select(days, "日期")
-    if not day:
-        return None
-
-    stamps = sorted(
-        (d for d in os.listdir(os.path.join(base, year, month, day))
-         if os.path.isdir(os.path.join(base, year, month, day, d)) and re.match(r"^\d{6}$", d)),
-        reverse=True,
-    )
-    stamp = _hierarchy_select(stamps, "时间")
-    if not stamp:
-        return None
-
-    return os.path.join(base, year, month, day, stamp)
-
-
-def _import_template_flow():
-    """Import a new template file from templates/import/."""
-    try:
-        changes = template_importer.detect_changes()
-    except Exception as e:
-        print(f"❌ 无法扫描导入文件夹：{e}")
-        return
-
-    if not changes:
-        print("未检测到新模板文件。")
-        return
-
-    print(f"发现 {len(changes)} 个新/已更新文件：")
-    for i, cand in enumerate(changes, start=1):
-        print(f"  [{i}] {cand.filename}")
-
-    choice = _prompt_with_hint(
-        "请选择文件编号（0 取消）：",
-        "输入要导入的文件编号"
-    ).strip()
-    if choice == "0":
-        print("已取消。")
-        return
-    try:
-        idx = int(choice) - 1
-        if idx < 0 or idx >= len(changes):
-            print("无效选择。")
-            return
-    except ValueError:
-        print("无效输入。")
-        return
-
-    candidate = changes[idx]
-    default_name = template_importer._template_name_from_filename(candidate.filename)
-    print(f"从文件名推断模板：{default_name}")
-    name_input = _prompt_with_hint(
-        "输入模板名（直接回车使用默认值）：",
-        "[Enter] 使用默认模板名"
-    ).strip()
-    template_name = name_input or default_name
-
-    has_work, reason = template_importer.has_unfinished_work(template_name)
-    if has_work:
-        print(f"\n⚠️ 警告：当前模板有未完成任务：{reason}")
-        force = _prompt_with_hint(
-            "是否继续？ (y/N): ",
-            "导入将归档当前模板"
-        ).strip().lower()
-        if force != "y":
-            print("已取消。")
-            return
-
-    # Source template selection
-    source_path = None
-    while True:
-        source_choice = _prompt_with_hint(
-            "请选择源模板：",
-            "[L] 使用最新/基础模板  [B] 浏览历史归档  [Q] 取消"
-        ).strip().lower()
-        if source_choice in ("l",):
-            source_path = _choose_latest_base_template(template_name)
-            break
-        elif source_choice in ("b",):
-            source_path = _browse_archive_history(template_name)
-            if source_path:
-                break
-            print("未选择归档模板，请重新选择源模板。")
-        elif source_choice in ("q", "quit"):
-            print("已取消。")
-            return
-        else:
-            print("无效选择。")
-
-    try:
-        result = template_importer.activate_template(
-            template_name, candidate.path, source_template_path=source_path, force=True
-        )
-        print(f"✅ 已导入为 '{result['template_name']}' ({result['source_language']})。")
-        print(f"   旧模板已归档至：{result['archive_path']}")
-        template_importer.save_import_state()
-    except Exception as e:
-        print(f"❌ 导入失败：{e}")
-        return
-
-    # Preview and confirm immediately after import
-    _confirm_template_flow()
-
-
-def _confirm_template_flow():
-    """Preview active templates and confirm/reset the confirmation flag."""
-    templates = template_engine.list_templates()
-    if not templates:
-        print("没有激活模板可供确认。请先导入模板。")
-        return
-
-    for name in templates:
-        try:
-            preview_html = template_importer.build_preview_html(name)
-            from email_agent.preview import _open_html
-            preview_path = _open_html(preview_html)
-            print(f"🌐 已打开模板 '{name}' 的浏览器预览：{preview_path}")
-        except Exception as e:
-            print(f"⚠️ 无法打开模板 '{name}' 的预览：{e}")
-
-    if config.is_template_confirmed():
-        reset = _prompt_with_hint(
-            "是否重置确认状态并要求重新确认？ (y/N): ",
-            "[y] 重置确认  [Enter/N] 保持当前确认"
-        ).strip().lower()
-        if reset == "y":
-            settings = data_store.load_settings()
-            settings["template_confirmed"] = False
-            settings["template_confirmed_at"] = None
-            data_store.save_settings(settings)
-            print("确认状态已重置。请在下方的预览后重新确认。")
-        else:
-            return
-
-    confirm = _prompt_with_hint(
-        "确认将此模板用于生成/发送？ (Y/n): ",
-        "[Y] 确认  [n] 保持未确认"
+def menu_toggle_skill():
+    print("\n[切换 skill 模式]")
+    print(f"当前模式：{config.SKILL_MODE}")
+    print("  full    - 使用完整版 email_writing_skill.md（仅模板导入参考）")
+    print("  concise - 使用精简版（仅模板导入参考）")
+    new_mode = _prompt_with_hint(
+        "输入模式（full/concise）或按 Enter 保持当前：",
+        "[full] 完整 skill  [concise] 精简 skill  [Enter] 保持当前"
     ).strip().lower()
-    if confirm in ("y", "yes"):
-        template_importer.confirm_active_template()
-        print("✅ 模板已确认。")
-    else:
-        print("模板保持未确认。生成和发送已被阻断。")
+    if not new_mode:
+        print("无变化。")
+        return
+    if new_mode not in ("full", "concise"):
+        print("无效模式，必须是 'full' 或 'concise'。")
+        return
+    settings = data_store.load_settings()
+    settings["skill_mode"] = new_mode
+    data_store.save_settings(settings)
+    config.SKILL_MODE = new_mode
+    print(f"✅ Skill 模式已切换为 '{new_mode}'。下次启动仍有效。")
+
+
+def menu_sender_profile():
+    sender_profile_editor.edit_sender_profile_interactive()
+
+
+def menu_settings():
+    while True:
+        _print_settings_menu()
+        choice = _prompt_with_hint(
+            "请选择设置项：",
+            "[1]发送者信息 [2]切换模型 [3]切换skill [4]配置检查 [0]返回"
+        ).strip()
+
+        if choice == "1":
+            menu_sender_profile()
+            _wait_for_enter()
+        elif choice == "2":
+            menu_switch_model()
+            _wait_for_enter()
+        elif choice == "3":
+            menu_toggle_skill()
+            _wait_for_enter()
+        elif choice == "4":
+            menu_config()
+            _wait_for_enter()
+        elif choice == "0":
+            print("返回主菜单。")
+            break
+        else:
+            print("无效选择。")
+            _wait_for_enter()
 
 
 def menu_manage_archives():
@@ -547,6 +384,117 @@ def menu_manage_archives():
         print("✅ 归档已删除。")
     else:
         print("已取消。")
+
+
+def _import_template_flow():
+    """Import a new template file from templates/import/."""
+    try:
+        changes = template_importer.detect_changes()
+    except Exception as e:
+        print(f"❌ 无法扫描导入文件夹：{e}")
+        return
+
+    if not changes:
+        print("未检测到新模板文件。")
+        return
+
+    print(f"发现 {len(changes)} 个新/已更新文件：")
+    for i, cand in enumerate(changes, start=1):
+        print(f"  [{i}] {cand.filename}")
+
+    choice = _prompt_with_hint(
+        "请选择文件编号（0 取消）：",
+        "输入要导入的文件编号"
+    ).strip()
+    if choice == "0":
+        print("已取消。")
+        return
+    try:
+        idx = int(choice) - 1
+        if idx < 0 or idx >= len(changes):
+            print("无效选择。")
+            return
+    except ValueError:
+        print("无效输入。")
+        return
+
+    candidate = changes[idx]
+    default_name = template_importer._template_name_from_filename(candidate.filename)
+    print(f"从文件名推断模板：{default_name}")
+    name_input = _prompt_with_hint(
+        "输入模板名（直接回车使用默认值）：",
+        "[Enter] 使用默认模板名"
+    ).strip()
+    template_name = name_input or default_name
+
+    has_work, reason = template_importer.has_unfinished_work(template_name)
+    if has_work:
+        print(f"\n⚠️ 警告：当前模板有未完成任务：{reason}")
+        force = _prompt_with_hint(
+            "是否继续？ (y/N): ",
+            "导入将归档当前模板"
+        ).strip().lower()
+        if force != "y":
+            print("已取消。")
+            return
+
+    try:
+        result = template_importer.activate_template(
+            template_name, candidate.path, force=True
+        )
+        print(f"✅ 已导入为 '{result['template_name']}' ({result['source_language']})，已生成 {result['target_language']} 版本。")
+        print(f"   主模板：{result['main_path']}")
+        print(f"   双语模板：{result['other_path']}")
+        if result.get("archive_path"):
+            print(f"   旧模板已归档至：{result['archive_path']}")
+        template_importer.save_import_state()
+    except Exception as e:
+        print(f"❌ 导入失败：{e}")
+        return
+
+    # Preview and confirm immediately after import
+    _confirm_template_flow()
+
+
+def _confirm_template_flow():
+    """Preview active templates and confirm/reset the confirmation flag."""
+    from email_agent.preview import open_template_preview
+
+    templates = template_engine.list_templates()
+    if not templates:
+        print("没有激活模板可供确认。请先导入模板。")
+        return
+
+    for name in templates:
+        try:
+            preview_path = open_template_preview(name)
+            print(f"🌐 已打开模板 '{name}' 的预览：{preview_path}")
+        except Exception as e:
+            print(f"⚠️ 无法打开模板 '{name}' 的预览：{e}")
+
+    if config.is_template_confirmed():
+        reset = _prompt_with_hint(
+            "是否重置确认状态并要求重新确认？ (y/N): ",
+            "[y] 重置确认  [Enter/N] 保持当前确认"
+        ).strip().lower()
+        if reset == "y":
+            settings = data_store.load_settings()
+            settings["template_confirmed"] = False
+            settings["template_confirmed_at"] = None
+            data_store.save_settings(settings)
+            print("确认状态已重置。请在下方的预览后重新确认。")
+        else:
+            return
+
+    confirm = _prompt_with_hint(
+        "确认将此模板用于生成/发送？ (Y/n): ",
+        "[Y] 确认  [n] 保持未确认"
+    ).strip().lower()
+    if confirm in ("y", "yes"):
+        template_importer.confirm_active_template()
+        print("✅ 模板已确认。")
+    else:
+        print("模板保持未确认。生成和发送已被阻断。")
 
 
 def menu_import_template():
@@ -606,28 +554,6 @@ def menu_import_template():
             break
         else:
             print("无效选择。")
-
-
-def menu_toggle_skill():
-    print("\n[切换 skill 模式]")
-    print(f"当前模式：{config.SKILL_MODE}")
-    print("  full    - 使用完整版 email_writing_skill.md（较慢、更详细）")
-    print("  concise - 使用精简版（更快，约 50 行）")
-    new_mode = _prompt_with_hint(
-        "输入模式（full/concise）或按 Enter 保持当前：",
-        "[full] 完整 skill  [concise] 精简 skill  [Enter] 保持当前"
-    ).strip().lower()
-    if not new_mode:
-        print("无变化。")
-        return
-    if new_mode not in ("full", "concise"):
-        print("无效模式，必须是 'full' 或 'concise'。")
-        return
-    settings = data_store.load_settings()
-    settings["skill_mode"] = new_mode
-    data_store.save_settings(settings)
-    config.SKILL_MODE = new_mode
-    print(f"✅ Skill 模式已切换为 '{new_mode}'。下次启动仍有效。")
 
 
 def menu_delete_drafts():
@@ -692,7 +618,7 @@ def run():
         _print_menu()
         choice = _prompt_with_hint(
             "请选择操作：",
-            "[1]生成 [2]审核 [3]发送 [4]回复 [5]日志 [6]配置 [7]模型 [8]模板 [9]Skill [D]删除 [0]退出"
+            "[1]生成 [2]审核 [3]发送 [4]回复 [5]日志 [6]模板 [S]设置 [D]删除 [0]退出"
         ).strip()
 
         if choice == "1":
@@ -711,17 +637,10 @@ def run():
             menu_logs()
             _wait_for_enter()
         elif choice == "6":
-            menu_config()
-            _wait_for_enter()
-        elif choice == "7":
-            menu_switch_model()
-            _wait_for_enter()
-        elif choice == "8":
             menu_import_template()
             _wait_for_enter()
-        elif choice == "9":
-            menu_toggle_skill()
-            _wait_for_enter()
+        elif choice.lower() == "s":
+            menu_settings()
         elif choice.lower() == "d":
             menu_delete_drafts()
             _wait_for_enter()

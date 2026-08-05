@@ -2,6 +2,20 @@
 
 ## 2026-08-05
 
+### TASK-7: CLI 菜单重构
+
+- **修改文件**：`email_agent/cli_controller.py`
+- **核心逻辑**：
+  - 第一层菜单重构为 `[1]生成 [2]审核 [3]发送 [4]回复 [5]日志 [6]导入/确认模板 [S]设置 [D]删除 [0]退出`；
+  - 新增 `[S] 设置` 子菜单：`[1]发送者信息 [2]切换当前模型 [3]切换 skill 模式 [4]配置检查 [0]返回`；
+  - 配置检查增加发送者公司、邮箱、电话字段与文件目录显示；
+  - 导入流程移除不再需要的源模板选择（ headed by the new LLM-only importer），简化交互；
+  - 模板确认预览改为调用 `preview.open_template_preview()`。
+- **潜在风险**：
+  - 用户习惯于旧菜单编号（7/8/9）需要适应新布局；
+  - 导入流程不再支持基于旧模板合并样式，由 LLM 直接生成完整 HTML。
+- **下一步建议**：更新 README.md、CONFIG_GUIDE.md 等用户文档。
+
 ### TASK-6: Playwright 浏览器预览
 
 - **修改文件**：`email_agent/preview.py`、`requirements.txt`
