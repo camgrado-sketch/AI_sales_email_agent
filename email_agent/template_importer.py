@@ -37,6 +37,30 @@ def _normalize_template_name(name):
     return name or "initial_contact"
 
 
+def _image_ext_from_content_type(content_type):
+    """Map a MIME image type to a file extension."""
+    mapping = {
+        "image/png": ".png",
+        "image/jpeg": ".jpg",
+        "image/jpg": ".jpg",
+        "image/gif": ".gif",
+        "image/bmp": ".bmp",
+        "image/webp": ".webp",
+        "image/tiff": ".tiff",
+    }
+    return mapping.get(content_type, ".png")
+
+
+def _cleanup_template_images(template_name):
+    """Remove images from assets/images/ that belong to a previous import of template_name."""
+    if not os.path.exists(config.IMAGES_DIR):
+        return
+    prefix = f"{template_name}_img_"
+    for fname in os.listdir(config.IMAGES_DIR):
+        if fname.startswith(prefix):
+            os.remove(os.path.join(config.IMAGES_DIR, fname))
+
+
 def _template_name_from_filename(filename):
     """Map a source filename to a standard template name.
 
@@ -99,40 +123,81 @@ def save_import_state():
 # Content extraction -> Markdown
 # ------------------------------------------------------------------------------
 
-def extract_to_markdown(path):
+def extract_to_markdown(path, template_name=None):
     """Extract a Markdown-like text representation from md/docx/pdf."""
     ext = os.path.splitext(path)[1].lower()
     if ext == ".md":
         with open(path, "r", encoding="utf-8") as f:
             return f.read()
     if ext == ".docx":
-        return _docx_to_markdown(path)
+        return _docx_to_markdown(path, template_name=template_name)
     if ext == ".pdf":
         return _pdf_to_markdown(path)
     raise ValueError(f"Unsupported template file format: {ext}")
 
 
-def _docx_to_markdown(path):
+def _docx_to_markdown(path, template_name=None):
     try:
         import docx
+        from docx.oxml.ns import qn
     except ImportError as e:
         raise RuntimeError(
             "python-docx is required for .docx import. Run: pip install python-docx"
         ) from e
 
     doc = docx.Document(path)
+    os.makedirs(config.IMAGES_DIR, exist_ok=True)
+
+    base_name = template_name or _template_name_from_filename(os.path.basename(path)) or "template"
+    image_counter = 0
+
     lines = []
     for para in doc.paragraphs:
-        text = para.text.strip()
-        if not text:
-            continue
         style = (para.style.name or "").lower()
+        parts = []
+        for run in para.runs:
+            run_text = run.text
+            drawings = run._element.findall(qn("w:drawing"))
+            if not drawings:
+                if run_text:
+                    parts.append(run_text)
+                continue
+
+            # Preserve any text in the same run as the image.
+            if run_text:
+                parts.append(run_text)
+
+            for drawing in drawings:
+                blip = drawing.find(
+                    ".//{http://schemas.openxmlformats.org/drawingml/2006/main}blip"
+                )
+                if blip is None:
+                    continue
+                embed = blip.get(qn("r:embed"))
+                if not embed:
+                    continue
+                image_part = doc.part.related_parts.get(embed)
+                if not image_part:
+                    continue
+
+                image_counter += 1
+                image_name = f"{base_name}_img_{image_counter:02d}"
+                ext = _image_ext_from_content_type(image_part.content_type)
+                image_path = os.path.join(config.IMAGES_DIR, f"{image_name}{ext}")
+                with open(image_path, "wb") as f:
+                    f.write(image_part.blob)
+                parts.append(f"{{{{IMAGE:{image_name}}}}}")
+
+        para_text = "".join(parts).strip()
+        if not para_text:
+            continue
         if "heading" in style:
             level = re.search(r"\d", style)
             prefix = "#" * (int(level.group(0)) if level else 1)
-            lines.append(f"{prefix} {text}")
+            lines.append(f"{prefix} {para_text}")
         else:
-            lines.append(text)
+            lines.append(para_text)
+
     return "\n\n".join(lines)
 
 
@@ -614,9 +679,10 @@ def activate_template(template_name, candidate_path, source_template_path=None, 
             )
 
     _ensure_dirs()
+    _cleanup_template_images(template_name)
     archive_path = archive_current_template(template_name)
 
-    markdown = extract_to_markdown(candidate_path)
+    markdown = extract_to_markdown(candidate_path, template_name=template_name)
     source_lang = detect_language(markdown, os.path.basename(candidate_path))
 
     # The source_template_path argument is kept for CLI compatibility but ignored;
