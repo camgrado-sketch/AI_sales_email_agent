@@ -177,10 +177,34 @@ def test_import_flow_keeps_subject_when_user_accepts(isolated_env, monkeypatch):
 # Prompt rules coverage
 # ------------------------------------------------------------------------------
 
-def test_prompt_requires_non_empty_subject():
+def test_prompt_requires_natural_subject_with_allowed_variables():
     prompt = config.TEMPLATE_IMPORT_PROMPT_FILE
     with open(prompt, "r", encoding="utf-8") as f:
         text = f.read()
     assert "subject_template" in text
     assert "禁止为空" in text
-    assert "≤60" in text or "60 字符" in text
+    assert "{{CUSTOMER_COMPANY}}" in text
+    assert "{{CUSTOMER_FIRST_NAME}}" in text
+    assert "{{CUSTOMER_INDUSTRY}}" in text
+    assert "{{SENDER_MARKET_REGION}}" in text
+    assert "自然融入" in text
+    assert "禁止生硬拼接" in text
+    assert "10 个词" in text
+    assert "20 个字" in text
+
+
+def test_render_subject_replaces_unknown_variable(make_template, write_settings):
+    make_template(
+        name="subject_test",
+        subject_template="Hi {{CUSTOMER_FIRST_NAME}} — {{TYPO_SUBJ_VAR}}",
+        html="<html><body>Hello</body></html>",
+        variables=["CUSTOMER_FIRST_NAME"],
+    )
+    write_settings({"selected_template": "subject_test", "template_confirmed": True})
+    customer = {"id": "c1", "name": "Alice", "location": "Shanghai", "company": "Acme"}
+    from email_agent.email_generator import generate_for_customer
+    missing = []
+    draft = generate_for_customer(customer, missing_vars=missing)
+    assert "TYPO_SUBJ_VAR" in missing
+    assert "{{TYPO_SUBJ_VAR}}" not in draft["subject"]
+    assert "Alice" in draft["subject"]

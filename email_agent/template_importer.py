@@ -629,6 +629,12 @@ def activate_template(template_name, candidate_path, source_template_path=None, 
         fallback = _fallback_subject(markdown)
         print(f"⚠️ 警告：模板导入返回的 subject_template 为空，已自动生成主题：{fallback}")
         structured["subject_template"] = fallback
+
+    # Guard: English template subject should not contain Chinese characters.
+    final_subject = structured.get("subject_template", "").strip()
+    if source_lang == "en" and re.search(r"[一-鿿]", final_subject):
+        print("⚠️ 警告：英文模板主题中检测到汉字，请检查语言纯净度。")
+
     written = write_structured_template(template_name, structured, source_lang)
 
     # Mark as unconfirmed so the user has to review before generation,

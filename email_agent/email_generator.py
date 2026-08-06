@@ -139,13 +139,14 @@ def generate_for_customer(customer, language=None, missing_vars=None):
     html_body, images, files = template_engine.render(
         template_name, variables, language=chosen_language, missing_vars=local_missing
     )
-    if missing_vars is not None:
-        missing_vars.extend(local_missing)
 
     # Build subject from template config if it contains a declared subject_template,
     # otherwise use the template's subject_template. The template importer writes a
     # subject line into config.yaml as the first rule for reference; we render it here.
-    subject = _render_subject(template_config, variables)
+    subject = _render_subject(template_config, variables, missing_vars=local_missing)
+
+    if missing_vars is not None:
+        missing_vars.extend(local_missing)
 
     draft_id = data_store.generate_draft_id(customer_id)
     draft = {
@@ -170,11 +171,12 @@ def generate_for_customer(customer, language=None, missing_vars=None):
     return draft
 
 
-def _render_subject(template_config, variables):
+def _render_subject(template_config, variables, missing_vars=None):
     """Render the subject line template with variables.
 
     If config.yaml contains a 'subject_template' key, use it; otherwise fall back
     to a generic subject so drafts are never sent with an empty subject.
+    Unknown variables are replaced with an empty string and collected for warning.
     """
     subject_template = template_config.get("subject_template", "").strip()
     if not subject_template:
@@ -183,7 +185,11 @@ def _render_subject(template_config, variables):
 
     def replace_var(match):
         var_name = match.group(1).strip().upper()
-        return str(variables.get(var_name, match.group(0)))
+        if var_name in variables:
+            return str(variables[var_name])
+        if missing_vars is not None:
+            missing_vars.append(var_name)
+        return ""
 
     return re.sub(r"\{\{([^{}:]+)\}\}", replace_var, subject_template)
 
