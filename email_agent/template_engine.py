@@ -157,25 +157,3 @@ def render(template_name, variables, language=None):
     html = re.sub(r"\{\{([^{}:]+)\}\}", replace_var, html)
 
     return html, images, files
-
-
-def template_for_stage(stage):
-    """
-    Pick a default template name for a given sales stage.
-
-    Falls back to the 'other' template when the stage-specific template
-    does not exist, so that a generic template can still be used.
-    """
-    mapping = {
-        "new_lead": "initial_contact",
-        "contacted_no_reply": "follow_up",
-        "follow_up_no_reply": "final_note",
-        "replied": "follow_up",
-    }
-    name = mapping.get(stage, "initial_contact")
-    existing = list_templates()
-    if name in existing:
-        return name
-    if "other" in existing:
-        return "other"
-    return name

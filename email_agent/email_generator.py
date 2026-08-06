@@ -116,22 +116,19 @@ def generate_for_customer(customer, language=None):
     customer_id = customer.get("id") or customer.get("customer_id")
     analysis = interaction_analyzer.analyze(customer)
 
-    # User-selected template overrides automatic stage-based selection
     selected = config.get_selected_template()
     available_templates = template_engine.list_templates()
-    if selected and selected in available_templates:
-        template_name = selected
-    else:
-        template_name = analysis["template_type"]
+    if not selected:
+        raise RuntimeError(
+            "未选择生效模板。请先到菜单 6 [A] 选择要使用的模板。"
+        )
+    if selected not in available_templates:
+        raise RuntimeError(
+            f"生效模板 '{selected}' 不存在或已被删除。请先到菜单 6 [A] 重新选择。"
+        )
+    template_name = selected
 
     chosen_language = language or analysis.get("language", "cn")
-    if template_name not in available_templates:
-        if available_templates:
-            fallback = available_templates[0]
-            print(f"⚠️ 推荐模板 '{template_name}' 未激活，回退使用 '{fallback}'")
-            template_name = fallback
-        else:
-            raise RuntimeError("没有可用的激活模板，请先到菜单 6 导入/确认模板。")
 
     template_config = template_engine.get_template_config(template_name)
     variables = _build_variables(customer, template_config, language=chosen_language)
