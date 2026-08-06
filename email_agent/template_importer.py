@@ -589,10 +589,12 @@ def activate_template(template_name, candidate_path, source_template_path=None, 
     structured = structure_template_with_llm(markdown, os.path.basename(candidate_path))
     written = write_structured_template(template_name, structured, source_lang)
 
-    # Mark as unconfirmed so the user has to review before generation
+    # Mark as unconfirmed so the user has to review before generation,
+    # and record the import date for the status bar.
     settings = data_store.load_settings()
     settings["template_confirmed"] = False
     settings["template_confirmed_at"] = None
+    settings.setdefault("template_imported_at", {})[template_name] = datetime.now().strftime("%Y-%m-%d")
     data_store.save_settings(settings)
 
     return {

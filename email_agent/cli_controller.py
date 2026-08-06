@@ -183,6 +183,7 @@ def menu_check_replies():
             ).strip().lower()
             if choice in ("s", "save"):
                 check_replies(dry_run=False)
+                data_store.mark_all_replies_viewed()
                 print("✅ 回复已保存到 reply_logs.csv。")
                 break
             elif choice in ("r", "refresh"):
