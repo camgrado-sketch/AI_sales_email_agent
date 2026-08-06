@@ -94,13 +94,14 @@
 | TASK-D.3 | 修复 `interaction_analyzer.py` 的 `_detect_language()`，增加拼音城市名映射（`shanghai`, `beijing`, `guangzhou`, `shenzhen`, `chengdu`, `hangzhou` 等）。 | 客户 Location 为拼音城市时，正确判定为 `cn`。 |
 | TASK-D.4 | 在 `prompts/template_import_prompt.md` 中增加语言纯净规则约束：**英文版**所有文字必须全为英文，不得含任何汉字（品牌名统一使用 `GRADO Contract`）；**中文版**正文和标题使用中文，品牌名可使用英文名（`GRADO Contract`）或中文名（`格度商业家具`），但两者不得并排出现（如"GRADO Contract 格度商业家具"此类写法不允许）；变量占位符内容不强制转换。 | LLM 生成的 `en_html` 不含汉字；`cn_html` 正文为中文，品牌名符合规范，经终端预览可验证。 |
 
-### 新阶段 E：修复邮件主题生成
-**目标**：确保所有邮件都有主题，且主题语言符合规则。
+### 新阶段 E：重构邮件主题生成逻辑
+**目标**：标题由 LLM 生成含变量的模板字符串，发送时本地替换，确保与客户自然关联，同时遵守语言纯净规则。
 
 | 任务 ID | 任务描述 | 验收标准 |
 | :--- | :--- | :--- |
-| TASK-E.1 | 修改 `prompts/template_import_prompt.md`，强制要求 LLM 必须输出 `subject_template`：若原始模板有标题则提取，若无则根据正文自动生成。 | 所有导入的模板在 `config.yaml` 中均有 `subject_template` 字段，不为空。 |
-| TASK-E.2 | 在 `cli_controller.py` 的导入完成提示中，高亮显示生成的 `subject_template`，并提示用户可在确认前修改。 | 终端导入成功后，主题行以高亮颜色显示，用户可选择接受或手动修改。 |
+| TASK-E.1 | 修改 `prompts/template_import_prompt.md`，要求 LLM 输出 `subject_template` 时：(1) 若原始模板有标题则提取并转化为含变量的模板；(2) 若无标题则根据正文自动生成；(3) 可选择性引入 `{{CUSTOMER_COMPANY}}`、`{{CUSTOMER_FIRST_NAME}}`、`{{CUSTOMER_INDUSTRY}}`、`{{SENDER_MARKET_REGION}}` 等变量，以自然融入为原则，不强制使用；(4) 禁止生硬拼接变量；(5) 遵守语言纯净规则（英文版全英文，中文版全中文，品牌名规则同正文）。 | 导入后 `config.yaml` 中 `subject_template` 不为空，含变量的标题在测试客户数据下替换后语义自然，不出现硬编码固定字符串。 |
+| TASK-E.2 | 确认 `email_generator.py` 的 `_build_variables()` 已覆盖 `subject_template` 的变量替换，与正文使用同一变量字典。 | 生成的草稿中，每封邮件的 `subject` 字段已完成变量替换，不含 `{{...}}` 原始占位符。 |
+| TASK-E.3 | 在 `cli_controller.py` 的导入完成提示中，高亮显示生成的 `subject_template`（含原始占位符），并提示用户可在确认前手动修改。 | 终端导入成功后，主题模板以高亮颜色显示，用户输入新内容可覆盖，直接回车则保留 LLM 生成版本。 |
 
 ### 新阶段 F：修复浏览器预览自动跳转
 **目标**：模板确认和草稿审核时，浏览器窗口必须自动弹出，不能仅打印路径。
