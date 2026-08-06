@@ -39,6 +39,18 @@
   - 缺失图片继续发送后，邮件客户端会在原位置显示空白或红叉。
 - **下一步建议**：进入阶段 F（Playwright GUI 检测与醒目截图路径），确认后继续。
 
+### 阶段 F：Playwright 预览环境检测与无 GUI 截图路径高亮
+
+- **修改文件**：`email_agent/preview.py`、`tests/test_stage_f.py`
+- **核心逻辑**：
+  - 新增 `preview._has_gui()`：macOS/Windows 默认有 GUI；Linux 需 `DISPLAY` 环境变量且非 WSL；WSL 一律视为无 GUI。
+  - `_open_html()` 入口处根据 `_has_gui()` 直接选择模式：有 GUI 先试 `headless=False`，失败再回退 `headless=True`；无 GUI 直接走 `headless=True` 截图，避免无效的 headed 尝试与延迟。
+  - 无 GUI 截图路径使用 ANSI 加粗黄色高亮输出，防止用户错过。
+- **潜在风险**：
+  - 在 WSLg 等带 DISPLAY 的 WSL 环境会被强制视为无 GUI，需手动打开截图；如需支持 WSLg，可后续放宽 `_is_wsl()` 判断。
+  - -headed 失败回退截图时，终端已输出失败警告，可能让用户误以为预览出错。
+- **下一步建议**：进入 Step 4 全量测试 + 手动验收 + CHANGELOG 归档 + PR #2。
+
 ## 2026-08-05
 
 ### Bug Report 修复（feature/local-template-replace 黑盒测试）
