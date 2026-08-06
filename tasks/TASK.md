@@ -92,7 +92,7 @@
 | TASK-D.1 | 在 `email_generator.py` 的 `_build_variables()` 中建立别名映射字典（`company_name -> CUSTOMER_COMPANY` 等），覆盖常见的非标准变量名。 | 使用非标准变量名的模板，生成草稿时占位符被正确替换，不原样输出。 |
 | TASK-D.2 | 修复 `_build_variables()` 中 `CURRENT_DATE` 硬编码 `cn` 的 Bug，改为根据当前邮件的 `language` 参数动态生成。 | 英文邮件中日期格式为 `August 5, 2026`，中文邮件为 `2026年8月5日`。 |
 | TASK-D.3 | 修复 `interaction_analyzer.py` 的 `_detect_language()`，增加拼音城市名映射（`shanghai`, `beijing`, `guangzhou`, `shenzhen`, `chengdu`, `hangzhou` 等）。 | 客户 Location 为拼音城市时，正确判定为 `cn`。 |
-| TASK-D.4 | 在 `prompts/template_import_prompt.md` 中增加语言纯净规则约束：**英文版**所有文字必须全为英文，不得含任何汉字（品牌名统一使用 `GRADO Contract`）；**中文版**正文和标题使用中文，品牌名二选一：使用英文名（`GRADO Contract`）或纯中文名（`格度商业家具`），不允许中英混排；变量占位符内容不强制转换。 | LLM 生成的 `en_html` 不含汉字；`cn_html` 正文为中文，品牌名符合规范，经终端预览可验证。 |
+| TASK-D.4 | 在 `prompts/template_import_prompt.md` 中增加语言纯净规则约束：**英文版**所有文字必须全为英文，不得含任何汉字（品牌名统一使用 `GRADO Contract`）；**中文版**正文和标题使用中文，品牌名可使用英文名（`GRADO Contract`）或中文名（`格度商业家具`），但两者不得并排出现（如"GRADO Contract 格度商业家具"此类写法不允许）；变量占位符内容不强制转换。 | LLM 生成的 `en_html` 不含汉字；`cn_html` 正文为中文，品牌名符合规范，经终端预览可验证。 |
 
 ### 新阶段 E：修复邮件主题生成
 **目标**：确保所有邮件都有主题，且主题语言符合规则。
