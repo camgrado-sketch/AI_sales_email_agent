@@ -158,6 +158,38 @@ def _pdf_to_markdown(path):
     return "\n\n".join(paragraphs)
 
 
+def _truncate_subject(text, max_len=60):
+    """Truncate a subject line to max_len characters, preferably at a word boundary."""
+    text = (text or "").strip()
+    if len(text) <= max_len:
+        return text
+    truncated = text[:max_len]
+    if " " in truncated:
+        truncated = truncated.rsplit(" ", 1)[0]
+    return truncated.rstrip()
+
+
+def _fallback_subject(markdown):
+    """Derive a non-empty subject line from markdown when the LLM returns none."""
+    if not markdown:
+        return "GRADO Contract Partnership Opportunity"
+
+    # Prefer the first Markdown heading.
+    for line in markdown.splitlines():
+        line = line.strip()
+        m = re.match(r"^#+\s+(.+)", line)
+        if m:
+            return _truncate_subject(m.group(1))
+
+    # Otherwise use the first non-empty line.
+    for line in markdown.splitlines():
+        line = line.strip()
+        if line:
+            return _truncate_subject(line)
+
+    return "GRADO Contract Partnership Opportunity"
+
+
 # ------------------------------------------------------------------------------
 # Language detection
 # ------------------------------------------------------------------------------
@@ -592,6 +624,11 @@ def activate_template(template_name, candidate_path, source_template_path=None, 
     _ = source_template_path
 
     structured = structure_template_with_llm(markdown, os.path.basename(candidate_path))
+    subject_template = structured.get("subject_template", "").strip()
+    if not subject_template:
+        fallback = _fallback_subject(markdown)
+        print(f"⚠️ 警告：模板导入返回的 subject_template 为空，已自动生成主题：{fallback}")
+        structured["subject_template"] = fallback
     written = write_structured_template(template_name, structured, source_lang)
 
     # Mark as unconfirmed so the user has to review before generation,

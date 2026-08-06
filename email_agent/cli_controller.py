@@ -2,6 +2,8 @@ import os
 import re
 import sys
 
+import yaml
+
 from email_agent import config, data_store, sender_profile_editor, status, template_engine, template_importer
 
 
@@ -504,6 +506,24 @@ def _import_template_flow():
     except Exception as e:
         print(f"❌ 导入失败：{e}")
         return
+
+    # Allow the user to review/edit the generated subject line before confirmation.
+    try:
+        with open(result["config_path"], "r", encoding="utf-8") as f:
+            cfg = yaml.safe_load(f)
+        current_subject = cfg.get("subject_template", "")
+        print(f"\n\033[1m\033[96m当前邮件主题：{current_subject}\033[0m")
+        new_subject = _prompt_with_hint(
+            "[Enter] 接受 / 输入新主题：",
+            "可直接回车保留当前主题，或输入新的邮件主题"
+        ).strip()
+        if new_subject:
+            cfg["subject_template"] = new_subject
+            with open(result["config_path"], "w", encoding="utf-8") as f:
+                yaml.safe_dump(cfg, f, allow_unicode=True)
+            print(f"✅ 主题已更新为：{new_subject}")
+    except Exception as e:
+        print(f"⚠️ 无法读取/更新主题：{e}")
 
     # Preview and confirm immediately after import
     _confirm_template_flow()
