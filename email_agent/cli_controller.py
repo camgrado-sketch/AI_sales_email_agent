@@ -36,7 +36,6 @@ def _print_settings_menu():
     print("  [2] 切换当前模型")
     print("  [3] 切换 skill 模式")
     print("  [4] 配置检查")
-    print("  [5] 选择生效模板")
     print("  [0] 返回主菜单")
     print()
 
@@ -236,7 +235,7 @@ def menu_config():
     print(f"Skill 模式：      {config.SKILL_MODE}")
     print(f"模板已确认：      {config.is_template_confirmed()}")
     selected = config.get_selected_template()
-    print(f"生效模板：        {selected if selected else '（按阶段自动选择）'}")
+    print(f"生效模板：        {selected if selected else '（未选择）'}")
     print(f"Demo 模式：       {config.DEMO_MODE}")
     print(f"允许邮箱：        {config.ALLOWED_TEST_EMAILS}")
     print(f"日发送上限：      {config.MAX_DAILY_SENDS}")
@@ -313,14 +312,16 @@ def menu_select_template():
 
     current = config.get_selected_template()
     print("可用模板：")
-    print("  [0] 按销售阶段自动选择")
     for i, name in enumerate(templates, start=1):
         marker = " *" if name == current else "  "
-        print(f"{marker}[{i}] {name}")
+        imported_at = config.get_template_imported_at(name)
+        date_part = f" ({imported_at})" if imported_at else ""
+        status = _template_usage_state(name)
+        print(f"{marker}[{i}] {name}{date_part} [{status}]")
 
     choice = _prompt_with_hint(
-        f"请选择模板（0-{len(templates)}）或按 Enter 保持当前：",
-        "0 恢复自动规则，其他编号强制使用该模板"
+        f"请选择模板（1-{len(templates)}）或按 Enter 保持当前：",
+        "其他编号不会变更选择"
     ).strip()
     if not choice:
         print("无变化。")
@@ -331,18 +332,24 @@ def menu_select_template():
         print("无效输入。")
         return
 
-    settings = data_store.load_settings()
-    if idx == 0:
-        settings["selected_template"] = ""
-        data_store.save_settings(settings)
-        print("✅ 已恢复按销售阶段自动选择模板。")
-    elif 1 <= idx <= len(templates):
+    if 1 <= idx <= len(templates):
         selected = templates[idx - 1]
-        settings["selected_template"] = selected
-        data_store.save_settings(settings)
-        print(f"✅ 已选择生效模板：'{selected}'。生成草稿时将优先使用该模板。")
+        config.set_selected_template(selected)
+        print(f"✅ 已选择生效模板：'{selected}'。生成草稿时将使用该模板。")
     else:
         print("无效编号。")
+
+
+def _template_usage_state(template_name):
+    """Return a short usage state label for a template."""
+    approved = [d for d in data_store.load_drafts(status="approved") if d.get("template") == template_name]
+    if not approved:
+        return "未发送"
+    sent_ids = data_store.get_sent_draft_ids()
+    remaining = [d for d in approved if d.get("draft_id") not in sent_ids]
+    if not remaining:
+        return "已全部发送"
+    return f"部分发送（剩余 {len(remaining)} 封）"
 
 
 def menu_sender_profile():
@@ -354,7 +361,7 @@ def menu_settings():
         _print_settings_menu()
         choice = _prompt_with_hint(
             "请选择设置项：",
-            "[1]发送者信息 [2]切换模型 [3]切换skill [4]配置检查 [5]选择生效模板 [0]返回"
+            "[1]发送者信息 [2]切换模型 [3]切换skill [4]配置检查 [0]返回"
         ).strip()
 
         if choice == "1":
@@ -368,9 +375,6 @@ def menu_settings():
             _wait_for_enter()
         elif choice == "4":
             menu_config()
-            _wait_for_enter()
-        elif choice == "5":
-            menu_select_template()
             _wait_for_enter()
         elif choice == "0":
             print("返回主菜单。")
@@ -580,13 +584,11 @@ def _confirm_template_flow():
             print(f"✅ 模板 '{name}' 已确认。")
 
             set_active = _prompt_with_hint(
-                f"是否将 '{name}' 设为强制生效模板（覆盖自动阶段规则）？ (y/N): ",
-                "[y] 设为生效模板  [Enter/N] 仍按阶段自动选择"
+                f"是否将 '{name}' 设为生效模板？ (y/N): ",
+                "[y] 设为生效模板  [Enter/N] 仅确认，稍后手动选择"
             ).strip().lower()
             if set_active == "y":
-                settings = data_store.load_settings()
-                settings["selected_template"] = name
-                data_store.save_settings(settings)
+                config.set_selected_template(name)
                 print(f"✅ '{name}' 已设为生效模板。")
         else:
             print("模板保持未确认。生成和发送已被阻断。")
@@ -644,11 +646,13 @@ def menu_import_template():
 
         choice = _prompt_with_hint(
             "请选择：",
-            "[I] 导入新文件  [M] 管理归档  [R] 重置导入状态  [C] 确认/重置  [Q] 返回"
+            "[I] 导入新文件  [A] 选择生效模板  [C] 确认/重置  [M] 管理归档  [R] 重置导入状态  [Q] 返回"
         ).strip().lower()
 
         if choice in ("i", "import"):
             _import_template_flow()
+        elif choice in ("a", "activate"):
+            menu_select_template()
         elif choice in ("m", "manage"):
             menu_manage_archives()
         elif choice in ("r", "reset"):
