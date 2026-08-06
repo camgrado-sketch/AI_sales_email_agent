@@ -43,44 +43,26 @@ def _rule_based_stage(history):
     return "new_lead"
 
 
-def _strategy_for_stage(stage):
-    """Return a rule-based strategy note for the given stage."""
-    return {
-        "new_lead": "Introduce GRADO and request permission to share a tailored overview.",
-        "contacted_no_reply": "Add one specific reason GRADO is relevant and ask a low-friction question.",
-        "follow_up_no_reply": "Provide credible proof and a very low-barrier ask; pause if still no reply.",
-        "replied": "Respond to the customer's reply and propose a clear next step.",
-    }.get(stage, "")
-
-
 def analyze(customer):
     """
-    Analyze a customer and return sales stage + template recommendation.
+    Analyze a customer and return sales stage + language.
 
-    This function no longer calls an LLM; it relies on deterministic rules
-    based on email/reply history and customer location.
+    This function no longer calls an LLM and does not recommend a template type;
+    template selection is the user's responsibility via settings.json.
 
     Args:
         customer: Dict representing a customer row from customers.csv.
 
     Returns:
-        Dict with keys: stage, template_type, strategy, reason, language.
+        Dict with keys: stage, language, reason.
     """
     customer_id = customer.get("id") or customer.get("customer_id")
     history = data_store.get_customer_history(customer_id)
 
     stage = _rule_based_stage(history)
-    template_type = {
-        "new_lead": "initial_contact",
-        "contacted_no_reply": "follow_up",
-        "follow_up_no_reply": "final_note",
-        "replied": "follow_up",
-    }.get(stage, "initial_contact")
 
     return {
         "stage": stage,
-        "template_type": template_type,
-        "strategy": _strategy_for_stage(stage),
         "reason": f"Rule-based: sent={history['sent_count']}, replies={history['reply_count']}",
         "language": _detect_language(customer.get("location", "")),
     }
