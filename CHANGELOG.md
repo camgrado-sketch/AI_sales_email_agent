@@ -14,6 +14,18 @@
   - 用户编辑主题时只更新 `config.yaml`，不会同步修改已生成草稿的主题（已生成草稿保留旧主题）。
 - **下一步建议**：进入阶段 C（DOCX 图片提取与发送前缺失图片预检）或阶段 F（Playwright GUI 检测），请确认优先执行哪一项。
 
+### 阶段 E 优化（同步 main 文档后）
+
+- **修改文件**：`email_agent/email_generator.py`、`email_agent/template_importer.py`、`prompts/template_import_prompt.md`、`tests/test_stage_e.py`
+- **核心逻辑**：
+  - 按 PRD §3.4 与 TASK-E.1 细化 prompt：明确主题来源（有标题提取/无标题自动生成）、可选变量（`CUSTOMER_COMPANY`、`CUSTOMER_FIRST_NAME`、`CUSTOMER_INDUSTRY`、`SENDER_MARKET_REGION`）、自然融入原则、禁止生硬拼接、长度约束（英文 ≤10 词/中文 ≤20 字）；
+  - `email_generator._render_subject()` 支持缺失变量替换为空并收集，与正文使用同一变量字典，确保最终 `subject` 不含未解析 `{{...}}`；
+  - `template_importer.activate_template()` 在英文模板主题中检测到汉字时追加语言纯净度警告；
+- **潜在风险**：
+  - 长度/自然度规则依赖 LLM 遵循，导入侧只做兜底和空值警告，无法 100% 拦截不符合要求的主题；
+  - 英文主题汉字警告仅针对 source_lang == "en" 的模板，中文模板不强制检测英文混入。
+- **下一步建议**：进入阶段 C 或阶段 F，请确认优先执行哪一项。
+
 ## 2026-08-05
 
 ### Bug Report 修复（feature/local-template-replace 黑盒测试）
