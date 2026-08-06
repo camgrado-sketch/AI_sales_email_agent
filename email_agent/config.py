@@ -245,6 +245,32 @@ def get_selected_template():
     return str(_load_json(SETTINGS_JSON_FILE).get("selected_template", "")).strip()
 
 
+def set_selected_template(name):
+    """Persist the active template name to settings.json.
+
+    Pass an empty string or None to clear the selection.
+    """
+    settings = _load_json(SETTINGS_JSON_FILE)
+    if name:
+        settings["selected_template"] = str(name).strip()
+    else:
+        settings["selected_template"] = ""
+    _save_json(SETTINGS_JSON_FILE, settings)
+
+
+def get_template_imported_at(template_name):
+    """Return the imported-at date string for a template, or '' if unknown."""
+    imported_at = _load_json(SETTINGS_JSON_FILE).get("template_imported_at", {})
+    return str(imported_at.get(template_name, "")).strip()
+
+
+def _save_json(path, data):
+    """Persist a JSON object, creating parent directories if needed."""
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+
+
 # -----------------------------------------------------------------------------
 # Logging Headers
 # -----------------------------------------------------------------------------

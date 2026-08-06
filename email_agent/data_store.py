@@ -51,6 +51,24 @@ def load_reply_logs():
     return _read_csv(config.REPLY_LOGS_FILE)
 
 
+def count_unviewed_replies():
+    """Count reply log entries whose status is not 'viewed'."""
+    return sum(
+        1 for row in load_reply_logs()
+        if row.get("status", "") != "viewed"
+    )
+
+
+def mark_all_replies_viewed():
+    """Mark every reply log entry as viewed."""
+    rows = load_reply_logs()
+    if not rows:
+        return
+    for row in rows:
+        row["status"] = "viewed"
+    _write_csv(config.REPLY_LOGS_FILE, rows, config.REPLY_LOG_HEADERS)
+
+
 def load_drafts(status=None):
     """Load drafts from drafts.json. Optionally filter by review_status."""
     if not os.path.exists(config.DRAFTS_JSON_FILE) or os.path.getsize(config.DRAFTS_JSON_FILE) == 0:

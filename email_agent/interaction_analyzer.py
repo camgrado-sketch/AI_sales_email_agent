@@ -1,3 +1,5 @@
+import re
+
 from email_agent import config, data_store
 
 
@@ -17,13 +19,25 @@ def _detect_language(location):
         return "cn"
     if "(英文)" in loc or "(english)" in loc:
         return "en"
-    mainland_cities = (
+
+    # Chinese-character keywords (exact substring)
+    mainland_chinese = (
         "中国", "大陆", "北京", "上海", "广州", "深圳", "成都", "杭州",
-        "beijing", "shanghai", "guangzhou", "shenzhen", "chengdu", "hangzhou",
-        "nanjing", "wuhan", "xian", "xi'an", "chongqing", "tianjin", "suzhou",
+        "南京", "武汉", "西安", "重庆", "天津", "苏州",
     )
-    if any(k in loc for k in mainland_cities):
+    if any(k in loc for k in mainland_chinese):
         return "cn"
+
+    # ASCII city names require word boundaries to avoid false positives like "xian" in "asian"
+    mainland_cities = (
+        "beijing", "shanghai", "guangzhou", "shenzhen", "chengdu", "hangzhou",
+        "nanjing", "wuhan", "xian", "chongqing", "tianjin", "suzhou",
+    )
+    for city in mainland_cities:
+        pattern = r"\bxi['’]?an\b" if city == "xian" else rf"\b{re.escape(city)}\b"
+        if re.search(pattern, loc):
+            return "cn"
+
     if any(k in loc for k in ("香港", "台湾", "hong kong", "taiwan", "macau", "澳门")):
         return "en"
     return "en"
@@ -43,44 +57,26 @@ def _rule_based_stage(history):
     return "new_lead"
 
 
-def _strategy_for_stage(stage):
-    """Return a rule-based strategy note for the given stage."""
-    return {
-        "new_lead": "Introduce GRADO and request permission to share a tailored overview.",
-        "contacted_no_reply": "Add one specific reason GRADO is relevant and ask a low-friction question.",
-        "follow_up_no_reply": "Provide credible proof and a very low-barrier ask; pause if still no reply.",
-        "replied": "Respond to the customer's reply and propose a clear next step.",
-    }.get(stage, "")
-
-
 def analyze(customer):
     """
-    Analyze a customer and return sales stage + template recommendation.
+    Analyze a customer and return sales stage + language.
 
-    This function no longer calls an LLM; it relies on deterministic rules
-    based on email/reply history and customer location.
+    This function no longer calls an LLM and does not recommend a template type;
+    template selection is the user's responsibility via settings.json.
 
     Args:
         customer: Dict representing a customer row from customers.csv.
 
     Returns:
-        Dict with keys: stage, template_type, strategy, reason, language.
+        Dict with keys: stage, language, reason.
     """
     customer_id = customer.get("id") or customer.get("customer_id")
     history = data_store.get_customer_history(customer_id)
 
     stage = _rule_based_stage(history)
-    template_type = {
-        "new_lead": "initial_contact",
-        "contacted_no_reply": "follow_up",
-        "follow_up_no_reply": "final_note",
-        "replied": "follow_up",
-    }.get(stage, "initial_contact")
 
     return {
         "stage": stage,
-        "template_type": template_type,
-        "strategy": _strategy_for_stage(stage),
         "reason": f"Rule-based: sent={history['sent_count']}, replies={history['reply_count']}",
         "language": _detect_language(customer.get("location", "")),
     }

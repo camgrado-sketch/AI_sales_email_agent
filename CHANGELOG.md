@@ -1,5 +1,56 @@
 # CHANGELOG
 
+## 2026-08-06
+
+### 阶段 E：邮件主题非空兜底与导入后用户编辑
+
+- **修改文件**：`email_agent/template_importer.py`、`email_agent/cli_controller.py`、`prompts/template_import_prompt.md`、`tests/test_stage_e.py`
+- **核心逻辑**：
+  - 模板导入 prompt 新增邮件主题强制规则：`subject_template` 禁止为空，无标题时按正文首段/首句自动生成 ≤60 字符主题；
+  - `template_importer.activate_template()` 对 LLM 返回的空 `subject_template` 自动按 Markdown 首标题/首行兜底，打印黄色警告；
+  - `cli_controller._import_template_flow()` 导入成功后以 ANSI 加粗青色高亮当前主题，支持 `[Enter]` 接受或直接输入新主题回写 `config.yaml`；
+- **潜在风险**：
+  - 自动兜底主题依赖 Markdown 结构，若原文既无标题也无正文将回退到固定英文默认主题；
+  - 用户编辑主题时只更新 `config.yaml`，不会同步修改已生成草稿的主题（已生成草稿保留旧主题）。
+- **下一步建议**：进入阶段 C（DOCX 图片提取与发送前缺失图片预检）或阶段 F（Playwright GUI 检测），请确认优先执行哪一项。
+
+### 阶段 E 优化（同步 main 文档后）
+
+- **修改文件**：`email_agent/email_generator.py`、`email_agent/template_importer.py`、`prompts/template_import_prompt.md`、`tests/test_stage_e.py`
+- **核心逻辑**：
+  - 按 PRD §3.4 与 TASK-E.1 细化 prompt：明确主题来源（有标题提取/无标题自动生成）、可选变量（`CUSTOMER_COMPANY`、`CUSTOMER_FIRST_NAME`、`CUSTOMER_INDUSTRY`、`SENDER_MARKET_REGION`）、自然融入原则、禁止生硬拼接、长度约束（英文 ≤10 词/中文 ≤20 字）；
+  - `email_generator._render_subject()` 支持缺失变量替换为空并收集，与正文使用同一变量字典，确保最终 `subject` 不含未解析 `{{...}}`；
+  - `template_importer.activate_template()` 在英文模板主题中检测到汉字时追加语言纯净度警告；
+- **潜在风险**：
+  - 长度/自然度规则依赖 LLM 遵循，导入侧只做兜底和空值警告，无法 100% 拦截不符合要求的主题；
+  - 英文主题汉字警告仅针对 source_lang == "en" 的模板，中文模板不强制检测英文混入。
+- **下一步建议**：进入阶段 C 或阶段 F，请确认优先执行哪一项。
+
+### 阶段 C：图片/附件自动提取、CID 内联与发送前预检
+
+- **修改文件**：`email_agent/template_importer.py`、`email_agent/sender.py`、`tests/test_stage_c.py`
+- **核心逻辑**：
+  - `_docx_to_markdown()` 遍历 DOCX 段落 run，识别 `w:drawing` 内联图片，按 `<template_name>_img_NN.<ext>` 保存到 `assets/images/`，并在 Markdown 对应位置插入 `{{IMAGE:<name>}}`；
+  - `extract_to_markdown()` 新增 `template_name` 参数并透传；`activate_template()` 导入前先清理该模板旧图，避免序号与文件残留；
+  - `sender.create_email_message()` 以 `MIMEImage` + `Content-ID` + `Content-Disposition: inline` 方式附加图片，实现正文 CID 内联显示；
+  - 新增 `sender.check_draft_images()`，`process_queue()` 发送循环前检查图片路径，缺失时黄色清单警告并 `(y/N)` 询问是否继续；
+- **潜在风险**：
+  - 当前仅处理 DOCX 正文段落内联图，未覆盖表格、页眉页脚、VML 旧格式图片；PDF 图片提取也未实现；
+  - 缺失图片继续发送后，邮件客户端会在原位置显示空白或红叉。
+- **下一步建议**：进入阶段 F（Playwright GUI 检测与醒目截图路径），确认后继续。
+
+### 阶段 F：Playwright 预览环境检测与无 GUI 截图路径高亮
+
+- **修改文件**：`email_agent/preview.py`、`tests/test_stage_f.py`
+- **核心逻辑**：
+  - 新增 `preview._has_gui()`：macOS/Windows 默认有 GUI；Linux 需 `DISPLAY` 环境变量且非 WSL；WSL 一律视为无 GUI。
+  - `_open_html()` 入口处根据 `_has_gui()` 直接选择模式：有 GUI 先试 `headless=False`，失败再回退 `headless=True`；无 GUI 直接走 `headless=True` 截图，避免无效的 headed 尝试与延迟。
+  - 无 GUI 截图路径使用 ANSI 加粗黄色高亮输出，防止用户错过。
+- **潜在风险**：
+  - 在 WSLg 等带 DISPLAY 的 WSL 环境会被强制视为无 GUI，需手动打开截图；如需支持 WSLg，可后续放宽 `_is_wsl()` 判断。
+  - -headed 失败回退截图时，终端已输出失败警告，可能让用户误以为预览出错。
+- **下一步建议**：进入 Step 4 全量测试 + 手动验收 + CHANGELOG 归档 + PR #2。
+
 ## 2026-08-05
 
 ### Bug Report 修复（feature/local-template-replace 黑盒测试）

@@ -96,7 +96,7 @@ def _normalize_variables(variables):
     return normalized
 
 
-def render(template_name, variables, language=None):
+def render(template_name, variables, language=None, missing_vars=None):
     """
     Render an HTML email template.
 
@@ -104,6 +104,7 @@ def render(template_name, variables, language=None):
         template_name: Name of the template directory under templates/email.
         variables: Dict of placeholder values. Keys are normalized to uppercase.
         language: Optional language code to select template_<lang>.html.
+        missing_vars: Optional list to collect names of unresolved simple variables.
 
     Returns:
         Tuple of (html_body, images, files) where images/files are lists of dicts
@@ -152,30 +153,11 @@ def render(template_name, variables, language=None):
         var_name = match.group(1).strip().upper()
         if var_name in variables:
             return str(variables[var_name])
-        return match.group(0)
+        if missing_vars is not None:
+            missing_vars.append(var_name)
+        # Do not leak raw placeholders into outbound emails.
+        return ""
 
     html = re.sub(r"\{\{([^{}:]+)\}\}", replace_var, html)
 
     return html, images, files
-
-
-def template_for_stage(stage):
-    """
-    Pick a default template name for a given sales stage.
-
-    Falls back to the 'other' template when the stage-specific template
-    does not exist, so that a generic template can still be used.
-    """
-    mapping = {
-        "new_lead": "initial_contact",
-        "contacted_no_reply": "follow_up",
-        "follow_up_no_reply": "final_note",
-        "replied": "follow_up",
-    }
-    name = mapping.get(stage, "initial_contact")
-    existing = list_templates()
-    if name in existing:
-        return name
-    if "other" in existing:
-        return "other"
-    return name

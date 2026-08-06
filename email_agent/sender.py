@@ -39,6 +39,22 @@ def _attach_images(msg, images):
         msg.attach(mime_image)
 
 
+def check_draft_images(drafts):
+    """Return a list of image cids whose referenced files are missing on disk."""
+    missing = []
+    seen = set()
+    for draft in drafts:
+        for image in draft.get("images", []):
+            path = image.get("path")
+            cid = image.get("cid") or path or "unknown"
+            if cid in seen:
+                continue
+            seen.add(cid)
+            if not path or not os.path.exists(path):
+                missing.append(cid)
+    return missing
+
+
 def create_email_message(draft):
     """Create a MIME email message from a draft dict."""
     recipient = draft.get("email", "")
@@ -175,6 +191,17 @@ def process_queue(drafts=None):
         return
 
     print(f"Found {len(to_send)} approved draft(s) to send. Press Ctrl+C to pause.")
+
+    missing_images = check_draft_images(to_send)
+    if missing_images:
+        print(
+            f"\033[93m⚠️  以下图片文件缺失，邮件正文可能出现空白："
+            f"{', '.join(missing_images)}\033[0m"
+        )
+        confirm = input("图片缺失，是否仍继续发送？ (y/N): ").strip().lower()
+        if confirm != "y":
+            print("已取消发送。")
+            return
 
     remaining = list(to_send)
     try:
