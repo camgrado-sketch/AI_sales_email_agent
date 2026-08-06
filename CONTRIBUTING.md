@@ -5,15 +5,15 @@
 ## 1. 核心开发流程
 
 1. **阅读任务**: 所有的开发工作必须基于 `tasks/TASKS.md` 中的具体任务或 `docs/bug_report.md` 中的明确 Bug。禁止无边界的"自由优化"。
-2. **同步代码**: 任何操作前，必须执行 `git checkout main && git pull origin main`。
+2. **同步代码**: 任何操作前，必须执行 `git checkout develop && git pull origin develop`，从 `develop` 拉取最新代码后再创建工作分支。
 3. **架构先行**: (仅限新功能) 在编写代码前，必须先输出或更新 `docs/architecture.md`。
-4. **分支开发**: 必须在规范的 `feature/` 或 `fix/` 分支上工作。
+4. **分支开发**: 必须在规范的 `feature/` 或 `fix/` 分支上工作，PR 目标分支为 `develop`，**不得直接向 `main` 发起 PR**。
 5. **测试验证**: 提交前必须运行现有测试，确保未破坏原有功能。
 6. **提交 PR**: 开发完成后推送到远程分支，并使用标准模板发起 Pull Request。
 
 ## 2. Branch 与 Commit 规则
 
-- **分支规则**: 严禁直接修改 `main` 分支的业务代码（`src/`、`tests/`）。详情见 `docs/git-workflow.md`。
+- **分支规则**: 严禁直接修改 `main` 和 `develop` 分支的业务代码。所有代码变更必须通过 `feature/*` 或 `fix/*` 分支，向 `develop` 发起 PR。详情见 `docs/git-workflow.md`。
 - **Commit 规则**: 遵循 `[角色] type(scope): description` 格式。一次提交只做一件事（原子化提交）。
 
 ## 3. Pull Request 规范

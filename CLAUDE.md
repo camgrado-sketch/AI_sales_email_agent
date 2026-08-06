@@ -73,12 +73,18 @@ Before destructive operations:
 - ask confirmation
 
 ### Branch Rules
-**禁止直接修改 main。**
-Task必须在独立分支：
+**禁止直接修改 main 和 develop。**
+Task 必须在独立分支上开发，完成后向 `develop` 发起 PR，不得直接向 `main` 发起 PR：
 - Feature: `feature/task-xxx`
 - Bug: `fix/issue-xxx`
 
-如果当前在 main：先创建工作分支。
+创建工作分支时，必须从最新的 `develop` 分支拉取：
+```bash
+git checkout develop && git pull origin develop
+git checkout -b feature/task-xxx
+```
+
+如果当前在 main 或 develop：先创建工作分支。
 如果已经在目标分支：继续工作，不重复创建。
 
 ### Commit Rules
@@ -112,10 +118,12 @@ Never commit directly to main.
 禁止 push main。
 
 ### Pull Request
-完成任务后，使用 gh 创建 PR：
+完成任务后，使用 gh 创建 PR，目标分支必须是 **`develop`**，不得直接向 `main` 发起 PR：
 ```bash
-gh pr create
+gh pr create --base develop
 ```
+PR 描述中必须包含代码自审清单（无越界修改、无硬编码敏感信息、异常处理完善）。
+Manus 将对照 PRD 执行符合性审查，审查通过后由人工决定是否合并到 `develop`。
 
 ### Conflict Rules
 出现 merge conflict：
