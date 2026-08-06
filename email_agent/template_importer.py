@@ -298,6 +298,11 @@ Extracted content:
         else:
             result[key] = [str(v).strip() for v in value if str(v).strip()]
 
+    # Guard: English HTML must not contain Chinese characters.
+    en_html = result.get("en_html", "")
+    if re.search(r"[一-鿿]", en_html):
+        print("⚠️ 警告：en_html 中检测到汉字，请检查英文模板语言纯净度。")
+
     return result
 
 

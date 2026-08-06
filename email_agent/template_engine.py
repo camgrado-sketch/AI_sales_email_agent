@@ -96,7 +96,7 @@ def _normalize_variables(variables):
     return normalized
 
 
-def render(template_name, variables, language=None):
+def render(template_name, variables, language=None, missing_vars=None):
     """
     Render an HTML email template.
 
@@ -104,6 +104,7 @@ def render(template_name, variables, language=None):
         template_name: Name of the template directory under templates/email.
         variables: Dict of placeholder values. Keys are normalized to uppercase.
         language: Optional language code to select template_<lang>.html.
+        missing_vars: Optional list to collect names of unresolved simple variables.
 
     Returns:
         Tuple of (html_body, images, files) where images/files are lists of dicts
@@ -152,7 +153,10 @@ def render(template_name, variables, language=None):
         var_name = match.group(1).strip().upper()
         if var_name in variables:
             return str(variables[var_name])
-        return match.group(0)
+        if missing_vars is not None:
+            missing_vars.append(var_name)
+        # Do not leak raw placeholders into outbound emails.
+        return ""
 
     html = re.sub(r"\{\{([^{}:]+)\}\}", replace_var, html)
 

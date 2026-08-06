@@ -1,3 +1,5 @@
+import re
+
 from email_agent import config, data_store
 
 
@@ -17,13 +19,25 @@ def _detect_language(location):
         return "cn"
     if "(英文)" in loc or "(english)" in loc:
         return "en"
-    mainland_cities = (
+
+    # Chinese-character keywords (exact substring)
+    mainland_chinese = (
         "中国", "大陆", "北京", "上海", "广州", "深圳", "成都", "杭州",
-        "beijing", "shanghai", "guangzhou", "shenzhen", "chengdu", "hangzhou",
-        "nanjing", "wuhan", "xian", "xi'an", "chongqing", "tianjin", "suzhou",
+        "南京", "武汉", "西安", "重庆", "天津", "苏州",
     )
-    if any(k in loc for k in mainland_cities):
+    if any(k in loc for k in mainland_chinese):
         return "cn"
+
+    # ASCII city names require word boundaries to avoid false positives like "xian" in "asian"
+    mainland_cities = (
+        "beijing", "shanghai", "guangzhou", "shenzhen", "chengdu", "hangzhou",
+        "nanjing", "wuhan", "xian", "chongqing", "tianjin", "suzhou",
+    )
+    for city in mainland_cities:
+        pattern = r"\bxi['’]?an\b" if city == "xian" else rf"\b{re.escape(city)}\b"
+        if re.search(pattern, loc):
+            return "cn"
+
     if any(k in loc for k in ("香港", "台湾", "hong kong", "taiwan", "macau", "澳门")):
         return "en"
     return "en"

@@ -16,7 +16,8 @@ def _current_date(language="cn"):
     now = datetime.now()
     if language == "cn":
         return now.strftime("%Y年%m月%d日")
-    return now.strftime("%B %d, %Y")
+    # English date without leading zero: "August 6, 2026"
+    return f"{now.strftime('%B')} {now.day}, {now.year}"
 
 
 def _build_variables(customer, template_config, language="cn"):
@@ -72,9 +73,10 @@ def _build_variables(customer, template_config, language="cn"):
         "INDUSTRY": "CUSTOMER_INDUSTRY",
         "SENDER_COMPANY_NAME": "SENDER_COMPANY",
         "MARKET_REGION": "SENDER_MARKET_REGION",
+        "DATE": "CURRENT_DATE",
     }
     for alias, canonical in aliases.items():
-        if alias not in variables and canonical in variables:
+        if canonical in variables:
             variables[alias] = variables[canonical]
 
     return variables
@@ -108,7 +110,7 @@ def _is_skipped_customer(customer):
     return name.startswith("#")
 
 
-def generate_for_customer(customer, language=None):
+def generate_for_customer(customer, language=None, missing_vars=None):
     """Generate a single draft for a customer using local template variable replacement."""
     if not config.is_template_confirmed():
         raise RuntimeError("No template confirmed. Please import and confirm a template first (menu 6).")
@@ -133,9 +135,12 @@ def generate_for_customer(customer, language=None):
     template_config = template_engine.get_template_config(template_name)
     variables = _build_variables(customer, template_config, language=chosen_language)
 
+    local_missing = []
     html_body, images, files = template_engine.render(
-        template_name, variables, language=chosen_language
+        template_name, variables, language=chosen_language, missing_vars=local_missing
     )
+    if missing_vars is not None:
+        missing_vars.extend(local_missing)
 
     # Build subject from template config if it contains a declared subject_template,
     # otherwise use the template's subject_template. The template importer writes a
@@ -201,6 +206,7 @@ def generate_all(customers=None):
         print(f"⏳ Resuming generation. {len(processed_ids)} customer(s) already processed.")
 
     new_count = 0
+    all_missing = set()
     try:
         for customer in customers:
             customer_id = customer.get("id") or customer.get("customer_id")
@@ -217,7 +223,9 @@ def generate_all(customers=None):
 
             print(f"Generating draft for {customer.get('name')} at {customer.get('company')}...")
             try:
-                generate_for_customer(customer)
+                local_missing = []
+                generate_for_customer(customer, missing_vars=local_missing)
+                all_missing.update(local_missing)
                 processed_ids.add(customer_id)
                 data_store.save_generation_state(processed_ids)
                 new_count += 1
@@ -225,6 +233,12 @@ def generate_all(customers=None):
                 print(f"❌ Failed to generate draft for {customer_id}: {e}")
     except KeyboardInterrupt:
         print("\n⏸️  Generation paused by user.")
+
+    if all_missing:
+        print(
+            f"\033[93m⚠️  以下变量未能匹配，已替换为空字符串："
+            f"{', '.join(sorted(all_missing))}\033[0m"
+        )
 
     total_customers = len([c for c in customers if (c.get("id") or c.get("customer_id"))])
     all_drafts = data_store.load_drafts()
