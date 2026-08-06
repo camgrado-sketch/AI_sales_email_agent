@@ -5,6 +5,7 @@ import re
 import shlex
 import shutil
 import subprocess
+import sys
 import tempfile
 
 from email_agent import config, data_store, template_importer
@@ -48,6 +49,19 @@ def _is_wsl():
             return "microsoft" in release or "wsl" in release
     except Exception:
         return False
+
+
+def _has_gui():
+    """Return True when the environment is likely to support a headed browser.
+
+    macOS and Windows are assumed to have a GUI. On Linux, require a DISPLAY
+    environment variable and exclude WSL/SSH-like headless environments.
+    """
+    if sys.platform == "darwin" or sys.platform.startswith("win"):
+        return True
+    if _is_wsl():
+        return False
+    return bool(os.environ.get("DISPLAY"))
 
 
 def _open_with_browser_command(cmd, path):
@@ -123,7 +137,9 @@ def _open_with_playwright(path, headless=False):
                 screenshot_path = os.path.join(config.DATA_DIR, "latest_preview.png")
                 os.makedirs(config.DATA_DIR, exist_ok=True)
                 page.screenshot(path=screenshot_path, full_page=True)
-                print(f"📸 已生成 PNG 预览：{screenshot_path}")
+                print(
+                    f"\033[1m\033[93m📸 已生成 PNG 预览：{screenshot_path}\033[0m"
+                )
             # Keep the browser open in headed mode until the user closes it.
             # In headless mode we close immediately after screenshot.
             if not headless:
@@ -161,20 +177,31 @@ def _open_with_system_browser(path):
 
 
 def _open_html(html, suffix=".html"):
-    """Write HTML to a temp file and open it with Playwright, falling back as needed."""
+    """Write HTML to a temp file and open it with Playwright, falling back as needed.
+
+    On systems with a GUI (macOS/Windows, or Linux with DISPLAY and not WSL),
+    try Playwright headed first. Otherwise go straight to a headless screenshot.
+    """
     path = _write_temp_html(html, suffix=suffix)
 
-    # Primary: Playwright headed Chromium
-    if _open_with_playwright(path, headless=False):
-        return path
+    if _has_gui():
+        # Primary: Playwright headed Chromium
+        if _open_with_playwright(path, headless=False):
+            return path
 
-    # Fallback 1: Playwright headless screenshot
-    if _open_with_playwright(path, headless=True):
-        _copy_to_latest_preview(path)
-        print(f"🌐 临时 HTML 文件：{path}")
-        return path
+        # Fallback: Playwright headless screenshot
+        if _open_with_playwright(path, headless=True):
+            _copy_to_latest_preview(path)
+            print(f"🌐 临时 HTML 文件：{path}")
+            return path
+    else:
+        # Headless environments: screenshot directly, no invalid headed attempt
+        if _open_with_playwright(path, headless=True):
+            _copy_to_latest_preview(path)
+            print(f"🌐 临时 HTML 文件：{path}")
+            return path
 
-    # Fallback 2: system browser / webbrowser / WSL
+    # Fallback: system browser / webbrowser / WSL
     if _open_with_system_browser(path):
         return path
 
