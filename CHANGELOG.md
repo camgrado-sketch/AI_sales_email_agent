@@ -26,6 +26,19 @@
   - 英文主题汉字警告仅针对 source_lang == "en" 的模板，中文模板不强制检测英文混入。
 - **下一步建议**：进入阶段 C 或阶段 F，请确认优先执行哪一项。
 
+### 阶段 C：图片/附件自动提取、CID 内联与发送前预检
+
+- **修改文件**：`email_agent/template_importer.py`、`email_agent/sender.py`、`tests/test_stage_c.py`
+- **核心逻辑**：
+  - `_docx_to_markdown()` 遍历 DOCX 段落 run，识别 `w:drawing` 内联图片，按 `<template_name>_img_NN.<ext>` 保存到 `assets/images/`，并在 Markdown 对应位置插入 `{{IMAGE:<name>}}`；
+  - `extract_to_markdown()` 新增 `template_name` 参数并透传；`activate_template()` 导入前先清理该模板旧图，避免序号与文件残留；
+  - `sender.create_email_message()` 以 `MIMEImage` + `Content-ID` + `Content-Disposition: inline` 方式附加图片，实现正文 CID 内联显示；
+  - 新增 `sender.check_draft_images()`，`process_queue()` 发送循环前检查图片路径，缺失时黄色清单警告并 `(y/N)` 询问是否继续；
+- **潜在风险**：
+  - 当前仅处理 DOCX 正文段落内联图，未覆盖表格、页眉页脚、VML 旧格式图片；PDF 图片提取也未实现；
+  - 缺失图片继续发送后，邮件客户端会在原位置显示空白或红叉。
+- **下一步建议**：进入阶段 F（Playwright GUI 检测与醒目截图路径），确认后继续。
+
 ## 2026-08-05
 
 ### Bug Report 修复（feature/local-template-replace 黑盒测试）
