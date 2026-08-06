@@ -4,7 +4,7 @@
 
 ## 历史任务（已完成）
 
-以下为 `feature/local-template-replace` 分支已完成的开发工作，保留作为历史记录。
+以下为 `feature/local-template-replace` 和 `feature/task-stage-a-f` 分支已完成的开发工作，保留作为历史记录。
 
 ### 阶段零：架构与任务文档（已完成）
 | 任务 ID | 任务描述 | 状态 |
@@ -42,14 +42,14 @@
 | TASK-4.3 | 简化 `generate_all()` 中的错误处理与状态保存，保留可中断续跑。 | ✅ 已完成 |
 | TASK-4.4 | 移除 `skills/` 与 `prompts/email_generation_prompt.md` 在生成流程中的使用。 | ✅ 已完成 |
 
-### 阶段五至八（已完成）
-互动分析器简化、Playwright 预览、CLI 菜单重构、文档更新均已完成，详见 `CHANGELOG.md`。
+### 阶段 A-F（已完成）
+移除阶段逻辑、修复状态栏、图片自动提取、语言纯净规则、标题生成、浏览器跳转等均已完成，详见 `CHANGELOG.md`。
 
 ---
 
 ## 新增任务（待开发）
 
-以下任务基于黑盒测试 Bug Report（`docs/bug_report.md`）及 PRD v2.0 新增需求制定。
+以下任务基于人工黑盒测试 Bug Report（`docs/bug_report.md`）制定，修复交互体验、模板双语预览和图片提取失效等问题。
 **所有新任务必须严格遵循以下约束规则**：
 1. 不得在邮件生成阶段调用 LLM（LLM 唯一调用点为 `template_importer.py`）。
 2. 不得破坏已有的发送、接收、日志模块。
@@ -57,77 +57,18 @@
 
 ---
 
-### 新阶段 A：移除阶段逻辑，重构模板选择机制
-**目标**：取消"初次/跟进/结束"的阶段推荐逻辑，改为用户手动选择生效模板，长期生效。
+### 新阶段 G：体验优化与图片提取加固
+
+**目标**：解决人工测试中发现的界面不友好、预览不完整、图片提取失败等问题。
 
 | 任务 ID | 任务描述 | 验收标准 |
 | :--- | :--- | :--- |
-| TASK-A.1 | 删除 `interaction_analyzer.py` 中的 `template_type` 推荐逻辑（`new_lead -> initial_contact` 等映射）。保留语言判定，移除模板推荐。 | `analyze()` 不再返回 `template_type`，只返回 `stage`、`language`、`reason`。 |
-| TASK-A.2 | 在 `data_store.py` 和 `config.py` 中新增 `selected_template` 字段的读写支持。 | `settings.json` 中可持久化存储 `selected_template`，重启后不丢失。 |
-| TASK-A.3 | 在 `cli_controller.py` 的模板管理菜单（菜单 6）中新增 `[A] 选择生效模板` 选项，列出所有激活模板供用户选择。 | 终端显示模板列表（含名称、导入日期、使用状态），用户输入编号后写入 `settings.json`。 |
-| TASK-A.4 | 重构 `email_generator.py` 的模板选择逻辑：读取 `selected_template`，若未设置则报错提示用户先选择模板，不再自动降级。 | 生成草稿时，使用的模板与 `settings.json` 中 `selected_template` 完全一致。 |
-
-### 新阶段 B：修复终端状态栏
-**目标**：状态栏简洁、信息全面，包含模板状态、发送状态和回复情况。
-
-| 任务 ID | 任务描述 | 验收标准 |
-| :--- | :--- | :--- |
-| TASK-B.1 | 重构 `status.py`，计算并输出：当前生效模板名+导入日期、确认状态、发送状态（未发送/部分发送剩余N封/已全部发送）、未查看回复数。 | 状态栏在两行内完整显示，格式与 PRD 示例一致。 |
-| TASK-B.2 | 确保主菜单每次刷新时重新计算状态（不缓存旧状态）。 | 发送一封邮件后，重新进入主菜单时"剩余数量"立即更新。 |
-
-### 新阶段 C：修复图片/附件自动提取与嵌入
-**目标**：模板导入时自动提取图片，无需用户手动操作；发送时图片正确嵌入邮件。
-
-| 任务 ID | 任务描述 | 验收标准 |
-| :--- | :--- | :--- |
-| TASK-C.1 | 在 `template_importer.py` 的 `_docx_to_markdown()` 中增加图片提取逻辑：遍历 `.docx` 中的内嵌图片，按 `<template_name>_img_01.png` 格式保存至 `assets/images/`，并在 Markdown 中对应位置插入 `{{IMAGE:<name>}}` 占位符。 | 导入含图 `.docx` 后，`assets/images/` 中出现对应图片，Markdown 中有正确占位符。 |
-| TASK-C.2 | 在 `sender.py` 中确保 HTML 邮件发送时，`images` 列表中的图片以 CID 内联方式附加（`Content-ID: <cid>`），而非作为普通附件。 | 收件方邮箱中图片在正文位置正常显示，不出现在附件区。 |
-| TASK-C.3 | 在发送前检查 `images` 列表中的每个图片路径是否存在，若缺失则在终端警告并询问是否继续发送。 | 图片缺失时不静默发送，给出明确提示。 |
-
-### 新阶段 D：修复变量映射与语言规则
-**目标**：解决变量不匹配和语言判定漏洞，强制执行中英文纯净规则。
-
-| 任务 ID | 任务描述 | 验收标准 |
-| :--- | :--- | :--- |
-| TASK-D.1 | 在 `email_generator.py` 的 `_build_variables()` 中建立别名映射字典（`company_name -> CUSTOMER_COMPANY` 等），覆盖常见的非标准变量名。 | 使用非标准变量名的模板，生成草稿时占位符被正确替换，不原样输出。 |
-| TASK-D.2 | 修复 `_build_variables()` 中 `CURRENT_DATE` 硬编码 `cn` 的 Bug，改为根据当前邮件的 `language` 参数动态生成。 | 英文邮件中日期格式为 `August 5, 2026`，中文邮件为 `2026年8月5日`。 |
-| TASK-D.3 | 修复 `interaction_analyzer.py` 的 `_detect_language()`，增加拼音城市名映射（`shanghai`, `beijing`, `guangzhou`, `shenzhen`, `chengdu`, `hangzhou` 等）。 | 客户 Location 为拼音城市时，正确判定为 `cn`。 |
-| TASK-D.4 | 在 `prompts/template_import_prompt.md` 中增加语言纯净规则约束：**英文版**所有文字必须全为英文，不得含任何汉字（品牌名统一使用 `GRADO Contract`）；**中文版**正文和标题使用中文，品牌名可使用英文名（`GRADO Contract`）或中文名（`格度商业家具`），但两者不得并排出现（如"GRADO Contract 格度商业家具"此类写法不允许）；变量占位符内容不强制转换。 | LLM 生成的 `en_html` 不含汉字；`cn_html` 正文为中文，品牌名符合规范，经终端预览可验证。 |
-
-### 新阶段 E：重构邮件主题生成逻辑
-**目标**：标题由 LLM 生成含变量的模板字符串，发送时本地替换，确保与客户自然关联，同时遵守语言纯净规则。
-
-| 任务 ID | 任务描述 | 验收标准 |
-| :--- | :--- | :--- |
-| TASK-E.1 | 修改 `prompts/template_import_prompt.md`，要求 LLM 输出 `subject_template` 时：(1) 若原始模板有标题则提取并转化为含变量的模板；(2) 若无标题则根据正文自动生成；(3) 可选择性引入 `{{CUSTOMER_COMPANY}}`、`{{CUSTOMER_FIRST_NAME}}`、`{{CUSTOMER_INDUSTRY}}`、`{{SENDER_MARKET_REGION}}` 等变量，以自然融入为原则，不强制使用；(4) 禁止生硬拼接变量；(5) 遵守语言纯净规则（英文版全英文，中文版全中文，品牌名规则同正文）。 | 导入后 `config.yaml` 中 `subject_template` 不为空，含变量的标题在测试客户数据下替换后语义自然，不出现硬编码固定字符串。 |
-| TASK-E.2 | 确认 `email_generator.py` 的 `_build_variables()` 已覆盖 `subject_template` 的变量替换，与正文使用同一变量字典。 | 生成的草稿中，每封邮件的 `subject` 字段已完成变量替换，不含 `{{...}}` 原始占位符。 |
-| TASK-E.3 | 在 `cli_controller.py` 的导入完成提示中，高亮显示生成的 `subject_template`（含原始占位符），并提示用户可在确认前手动修改。 | 终端导入成功后，主题模板以高亮颜色显示，用户输入新内容可覆盖，直接回车则保留 LLM 生成版本。 |
-
-### 新阶段 F：修复浏览器预览自动跳转
-**目标**：模板确认和草稿审核时，浏览器窗口必须自动弹出，不能仅打印路径。
-
-| 任务 ID | 任务描述 | 验收标准 |
-| :--- | :--- | :--- |
-| TASK-F.1 | 在 `preview.py` 的 `_open_html()` 入口处增加环境检测：检查 `DISPLAY` 环境变量和是否为 WSL，有 GUI 时直接使用 `headless=False`，无 GUI 时直接使用 `headless=True`，避免无效的 headed 尝试。 | 在本地 Mac/Windows 环境下，预览时浏览器窗口必须自动弹出；在 WSL/SSH 环境下，终端必须打印截图路径。 |
-| TASK-F.2 | 无 GUI 环境下，终端输出截图路径时使用醒目格式显示（如 ANSI 加粗或黄色输出），避免用户错过。 | 无 GUI 环境下预览时，终端输出中包含醒目的截图路径提示，不静默失败。 |
+| TASK-G.1 | **终端 UI 与文案净化**：在 `cli_controller.py` 各菜单入口加入清屏（clear）操作；在 `preview.py` 捕获 Playwright 缺失异常，屏蔽大段英文栈，输出简短友好的中文提示；清理 `cli_controller.py` 中关于"强制生效模板"、"覆盖自动阶段"等晦涩文案，统一改为"设为当前生效模板"。 | 菜单切换时屏幕清爽；无 Playwright 环境时不打印大段英文错误；终端提示语通俗易懂。 |
+| TASK-G.2 | **双语模板分离预览与确认**：重构 `template_importer.py` 和 `preview.py` 的预览逻辑，在确认模板时（`_confirm_template_flow`），必须依次打开 `template_cn.html` 和 `template_en.html` 供用户分别预览；同时排查 `language 生成失败` 的潜在异常，增加容错日志。 | 确认环节能弹出两个预览窗口（中英文各一）；导入生成时不再出现无法理解的 language 报错。 |
+| TASK-G.3 | **docx 图片提取机制加固**：优化 `template_importer.py` 的 `_docx_to_markdown` 图片提取逻辑，支持遍历文档所有 shape 和 inline 图片，兼容不同版本的 Word 嵌入方式；同时强化 `template_import_prompt.md`，明确要求 LLM 绝对禁止改变图片和文件占位符的相对位置与数量。 | 导入人工测试使用的含图 `.docx` 后，图片被正确提取到 `assets/images/`，生成的 HTML 中占位符数量和位置与原文档一致。 |
+| TASK-G.4 | **可视化编辑器预研（架构评估）**：在 `docs/architecture.md` 中新增章节，评估从纯 CLI 升级为本地 Web UI（如 FastAPI + 简单网页编辑器）的可行性，用于直接修改模板文字和变量内容。 | 仅输出架构设计与可行性分析，不编写业务代码。 |
 
 ---
-
-## 任务依赖关系
-
-```
-新阶段 A（模板选择重构）
-  │
-  ├── 新阶段 B（状态栏修复）← 依赖 A.2（selected_template 字段）
-  │
-  ├── 新阶段 C（图片提取）← 可独立执行
-  │
-  ├── 新阶段 D（变量/语言修复）← 可独立执行
-  │
-  ├── 新阶段 E（主题生成）← 依赖 D.4（Prompt 更新）
-  │
-  └── 新阶段 F（浏览器跳转）← 可独立执行
-```
 
 ## 提交规范
 
@@ -136,6 +77,6 @@
 [Claude] fix(模块): 描述
 ```
 例如：
-- `[Claude] fix(analyzer): 移除阶段模板推荐，保留语言判定`
-- `[Claude] fix(cli): 新增选择生效模板菜单项`
-- `[Claude] fix(importer): 自动提取 docx 图片至 assets/images`
+- `[Claude] fix(cli): 净化交互文案并增加清屏机制`
+- `[Claude] fix(importer): 实现双语模板分离预览与确认`
+- `[Claude] fix(importer): 加固 docx 图片提取兼容性`
