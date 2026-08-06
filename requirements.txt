@@ -1,1 +1,10 @@
 python-dotenv==1.2.2
+httpx==0.27.2
+openai==1.46.0
+pyyaml==6.0.2
+dnspython==2.6.1
+python-docx>=0.8.11
+pdfplumber>=0.6.0
+beautifulsoup4>=4.11.0
+langdetect>=1.0.9
+playwright>=1.40.0

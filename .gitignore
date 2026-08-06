@@ -1,11 +1,8 @@
-# Environment variables (secrets)
 .env
 
-# Data files (contains real customer info and logs)
-data/customers.csv
-data/email_logs.csv
-data/reply_logs.csv
-data/drafts/
+# Data files (contains real customer info, logs, and runtime state)
+data/
+!data/.gitkeep
 
 # Python cache
 __pycache__/
@@ -24,3 +21,7 @@ ENV/
 # OS generated files
 .DS_Store
 Thumbs.db
+
+# Runtime template archives
+templates/archive/*
+!templates/archive/.gitkeep
