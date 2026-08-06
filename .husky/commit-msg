@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+# Commit message format check
+
+COMMIT_MSG_FILE=$1
+COMMIT_MSG=$(cat $COMMIT_MSG_FILE)
+
+# Regex for Conventional Commits with optional [Role] prefix
+PATTERN="^(\[[a-zA-Z]+\] )?(feat|fix|refactor|docs|test|chore)(\([a-zA-Z0-9_-]+\))?: .+"
+
+if [[ ! $COMMIT_MSG =~ $PATTERN ]]; then
+  echo "Error: Commit message format is invalid."
+  echo "Expected format: [Role] type(scope): description"
+  echo "Example: [Claude] feat(email): add template generator"
+  echo "Allowed types: feat, fix, refactor, docs, test, chore"
+  exit 1
+fi

@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+# Branch name and basic status check
+
+BRANCH_NAME=$(git symbolic-ref --short HEAD 2>/dev/null)
+
+# Prevent direct commit to main
+if [ "$BRANCH_NAME" = "main" ]; then
+  # Allow docs/ changes directly to main (Manus role)
+  # For a stricter setup, even docs should go through PR, but per current rules Manus can push docs to main
+  # We will warn but not block if it's main.
+  echo "Warning: You are committing directly to 'main' branch."
+  echo "Ensure you are only committing documentation or reports (Manus role)."
+fi
+
+# Check branch name format if not main
+if [ "$BRANCH_NAME" != "main" ]; then
+  PATTERN="^(feature|fix|hotfix|refactor|docs|test)/[a-zA-Z0-9_-]+"
+  if [[ ! $BRANCH_NAME =~ $PATTERN ]]; then
+    echo "Error: Branch name '$BRANCH_NAME' is invalid."
+    echo "Expected format: type/description"
+    echo "Allowed types: feature, fix, hotfix, refactor, docs, test"
+    echo "Example: feature/email-template"
+    exit 1
+  fi
+fi
+
+# Basic syntax check for Python files
+# find . -name "*.py" -not -path "*/\.*" | xargs python3 -m py_compile
+# if [ $? -ne 0 ]; then
+#   echo "Error: Python syntax check failed."
+#   exit 1
+# fi
