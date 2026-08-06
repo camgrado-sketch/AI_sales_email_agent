@@ -1,5 +1,19 @@
 # CHANGELOG
 
+## 2026-08-06
+
+### 阶段 E：邮件主题非空兜底与导入后用户编辑
+
+- **修改文件**：`email_agent/template_importer.py`、`email_agent/cli_controller.py`、`prompts/template_import_prompt.md`、`tests/test_stage_e.py`
+- **核心逻辑**：
+  - 模板导入 prompt 新增邮件主题强制规则：`subject_template` 禁止为空，无标题时按正文首段/首句自动生成 ≤60 字符主题；
+  - `template_importer.activate_template()` 对 LLM 返回的空 `subject_template` 自动按 Markdown 首标题/首行兜底，打印黄色警告；
+  - `cli_controller._import_template_flow()` 导入成功后以 ANSI 加粗青色高亮当前主题，支持 `[Enter]` 接受或直接输入新主题回写 `config.yaml`；
+- **潜在风险**：
+  - 自动兜底主题依赖 Markdown 结构，若原文既无标题也无正文将回退到固定英文默认主题；
+  - 用户编辑主题时只更新 `config.yaml`，不会同步修改已生成草稿的主题（已生成草稿保留旧主题）。
+- **下一步建议**：进入阶段 C（DOCX 图片提取与发送前缺失图片预检）或阶段 F（Playwright GUI 检测），请确认优先执行哪一项。
+
 ## 2026-08-05
 
 ### Bug Report 修复（feature/local-template-replace 黑盒测试）
