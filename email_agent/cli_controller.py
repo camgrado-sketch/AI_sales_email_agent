@@ -513,9 +513,12 @@ def _import_template_flow():
         result = template_importer.activate_template(
             template_name, candidate.path, force=True
         )
-        print(f"✅ 已导入为 '{result['template_name']}' ({result['source_language']})，已生成 {result['target_language']} 版本。")
+        print(f"✅ 已导入为 '{result['template_name']}' ({result['source_language']})。")
         print(f"   主模板：{result['main_path']}")
-        print(f"   双语模板：{result['other_path']}")
+        if result.get("other_path"):
+            print(f"   双语模板（{result['target_language']}）：{result['other_path']}")
+        else:
+            print(f"   双语模板（{result['target_language']}）：未生成（LLM 输出缺少该语言内容，见上方警告）")
         if result.get("archive_path"):
             print(f"   旧模板已归档至：{result['archive_path']}")
         template_importer.save_import_state()
@@ -601,11 +604,14 @@ def _confirm_template_flow():
                 print("无效输入。")
                 return
 
-    # Preview each selected template
+    # Preview each selected template (one preview window per available language)
     for name in selected_templates:
         try:
-            preview_path = open_template_preview(name)
-            print(f"🌐 已打开模板 '{name}' 的预览：{preview_path}")
+            preview_paths = open_template_preview(name)
+            if preview_paths:
+                print(f"🌐 已打开模板 '{name}' 的预览（{len(preview_paths)} 个语言版本）。")
+            else:
+                print(f"⚠️ 模板 '{name}' 未能打开预览：没有可用的模板文件。")
         except Exception as e:
             print(f"⚠️ 无法打开模板 '{name}' 的预览：{e}")
 

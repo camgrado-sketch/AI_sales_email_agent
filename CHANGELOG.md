@@ -1,5 +1,22 @@
 # CHANGELOG
 
+## 2026-08-07
+
+### TASK-G.2：双语模板分离预览与确认
+
+- **修改文件**：`email_agent/template_importer.py`、`email_agent/preview.py`、`email_agent/cli_controller.py`、`tests/test_stage_g.py`
+- **核心逻辑**：
+  - **双语分离预览**：新增 `template_importer.resolve_template_preview_files()`，按「中文在前、英文在后」解析各语言预览文件，解析规则与 `template_engine.render()` 一致（优先 `template_<lang>.html`，缺失时回退 `template.html`——即源语言文件）；`preview.open_template_preview()` 改为依次打开每个语言版本的独立预览窗口并显示进度（如"正在打开中文版模板预览（1/2）"），返回打开的文件路径列表；`build_preview_html()` 新增 `language` 参数，预览页标题/横幅标注语言；
+  - **缺失/空文件明确提示**：语言变体文件缺失时提示"缺少 template_<lang>.html，将显示默认 template.html"；变体文件存在但内容为空（LLM 生成缺失的后果）时警告并回退默认模板；完全无可用文件时跳过该语言预览并警告，不再静默打开空窗口；
+  - **"language 生成失败"容错**：`structure_template_with_llm()` 对 LLM 返回做三层防护——缺少 `content` 字段、JSON 解析失败（原报 `Expecting value: line 1 column 1`）、返回非对象，均抛出可理解的中文错误并建议重试/切换模型；字段命名不符（如 `chinese_html`/`zh_html`/`html_cn`）自动归一化为 `cn_html`/`en_html` 并提示；任一语言 HTML 为空时打印明确中文警告；
+  - **写盘防护**：`write_structured_template()` 源语言 HTML 为空时抛出 `ValueError`（禁止写出空 `template.html`）；目标语言为空时不再写空文件，`other_path` 返回 `None` 并警告，CLI 导入结果展示相应改为"未生成（见上方警告）"；
+  - **元数据**：`config.yaml` 新增持久化 `source_language` 字段，供后续预览与诊断使用。
+- **潜在风险**：
+  - `open_template_preview()` 返回类型由单个路径字符串变为路径列表（现网唯一调用方 `_confirm_template_flow` 已同步更新；测试桩返回字符串不受影响）；
+  - 旧模板（手写、仅含 `template.html`）确认时只打开一个预览窗口并提示缺少变体文件，属预期行为；
+  - `config.yaml` 新增字段为纯增量，现有读取方均用 `.get()`，无兼容性问题。
+- **下一步建议**：进入 TASK-G.3（docx 图片提取机制加固）。
+
 ## 2026-08-06
 
 ### TASK-G.1：终端 UI 与文案净化
