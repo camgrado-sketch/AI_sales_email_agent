@@ -2,6 +2,15 @@
 
 ## 2026-08-06
 
+### 修复 test_stage_d 英文日期断言跨日失败
+
+- **修改文件**：`tests/test_stage_d.py`
+- **核心逻辑**：
+  - `test_english_date_has_no_leading_zero` 原断言硬编码编写当日日期（`"August 6, 2026"`），跨日即失败（2026-08-07 基线跑出 1 failed/74 passed）；
+  - 改为按 `email_generator._current_date()` 的英文格式（`f"{now.strftime('%B')} {now.day}, {now.year}"`）动态计算期望值；仅当 `now.day < 10` 时校验无前导零形式，保持原测试意图不变。
+- **潜在风险**：无（测试断言与被测代码使用同一格式逻辑，若未来 `_current_date` 英文格式变更，测试将同步暴露）。
+- **下一步建议**：合入后 develop 基线恢复 75/75 全绿，可进入阶段 G.1。
+
 ### TASK-R2：README 补充模板导入依赖说明
 
 - **修改文件**：`README.md`
