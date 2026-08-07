@@ -382,7 +382,20 @@ Extracted content:
         _template_structure_schema(),
         temperature=0.3,
     )
-    result = json.loads(raw["content"])
+    try:
+        content = raw["content"]
+    except (TypeError, KeyError) as e:
+        raise RuntimeError(
+            f"LLM 返回结果缺少 content 字段（{e}）。请重试导入，或在设置（菜单 S）中切换模型。"
+        ) from e
+    try:
+        result = json.loads(content)
+    except (TypeError, json.JSONDecodeError) as e:
+        raise RuntimeError(
+            f"LLM 返回内容无法解析为 JSON（{e}）。请重试导入，或在设置（菜单 S）中切换模型。"
+        ) from e
+    if not isinstance(result, dict):
+        raise RuntimeError("LLM 返回的模板结构不是 JSON 对象，请重试导入或切换模型。")
 
     # Normalize arrays to strings and strip whitespace
     for key in ("subject_template", "cn_html", "en_html"):
@@ -394,6 +407,27 @@ Extracted content:
             result[key] = []
         else:
             result[key] = [str(v).strip() for v in value if str(v).strip()]
+
+    # 容错：LLM 可能返回命名不符的语言字段（如 chinese_html），归一化到 cn_html/en_html。
+    for canonical, aliases in (
+        ("cn_html", ("chinese_html", "zh_html", "html_cn")),
+        ("en_html", ("english_html", "html_en")),
+    ):
+        if not str(result.get(canonical, "") or "").strip():
+            for alt in aliases:
+                alt_value = result.get(alt)
+                if str(alt_value or "").strip():
+                    result[canonical] = str(alt_value)
+                    print(f"ℹ️ LLM 输出使用了字段名 '{alt}'，已归一化为 '{canonical}'。")
+                    break
+
+    # 容错日志：任一语言 HTML 缺失时给出明确中文提示，而不是让下游抛出难懂的错误。
+    for key, label in (("cn_html", "中文"), ("en_html", "英文")):
+        if not str(result.get(key, "") or "").strip():
+            print(
+                f"⚠️ 警告：LLM 输出缺少{label}模板内容（'{key}' 为空），"
+                f"{label}版模板将不会生成。可稍后重新导入，或手工补充对应模板文件。"
+            )
 
     # Guard: English HTML must not contain Chinese characters.
     en_html = result.get("en_html", "")
@@ -407,7 +441,7 @@ Extracted content:
 # Write structured template to disk
 # ------------------------------------------------------------------------------
 
-def _default_config_yaml(template_name, structured):
+def _default_config_yaml(template_name, structured, source_lang=None):
     """Build a default config.yaml content from the structured template."""
     variables = structured.get("variables", [])
     images = structured.get("images", [])
@@ -416,12 +450,16 @@ def _default_config_yaml(template_name, structured):
 
     lines = [
         f"template_name: {template_name}",
+    ]
+    if source_lang:
+        lines.append(f"source_language: {source_lang}")
+    lines.extend([
         "purpose: Auto-imported template",
         "customer_type: all",
         "recommended_stage: new_lead",
         f"subject_template: {subject_template!r}",
         "variables:",
-    ]
+    ])
     for v in variables:
         lines.append(f"  - {v}")
     lines.append("images:")
@@ -449,10 +487,23 @@ def write_structured_template(template_name, structured, source_lang):
 
     Returns:
         dict with paths: main_path, other_path, config_path, source_language, target_language.
+        other_path is None when the LLM did not produce the target-language HTML.
+
+    Raises:
+        ValueError: when the source-language HTML is missing, since an empty
+            template.html would break the whole template.
     """
     target_lang = "en" if source_lang == "cn" else "cn"
     source_html_key = "cn_html" if source_lang == "cn" else "en_html"
     target_html_key = "en_html" if source_lang == "cn" else "cn_html"
+
+    source_html = str(structured.get(source_html_key, "") or "")
+    target_html = str(structured.get(target_html_key, "") or "")
+    if not source_html.strip():
+        raise ValueError(
+            f"模板导入失败：LLM 未返回源语言（{source_lang}）模板内容"
+            f"（'{source_html_key}' 为空）。请重试导入，或检查 LLM 配置。"
+        )
 
     target_dir = os.path.join(config.TEMPLATES_DIR, template_name)
     os.makedirs(target_dir, exist_ok=True)
@@ -462,17 +513,25 @@ def write_structured_template(template_name, structured, source_lang):
     config_path = os.path.join(target_dir, "config.yaml")
 
     with open(main_path, "w", encoding="utf-8") as f:
-        f.write(structured.get(source_html_key, ""))
+        f.write(source_html)
 
-    with open(other_path, "w", encoding="utf-8") as f:
-        f.write(structured.get(target_html_key, ""))
+    written_other_path = None
+    if target_html.strip():
+        with open(other_path, "w", encoding="utf-8") as f:
+            f.write(target_html)
+        written_other_path = other_path
+    else:
+        print(
+            f"⚠️ 警告：{target_lang} 版模板未写入（LLM 输出缺少 '{target_html_key}' 字段）。"
+            f"可手工创建 {other_path} 或重新导入。"
+        )
 
     with open(config_path, "w", encoding="utf-8") as f:
-        f.write(_default_config_yaml(template_name, structured))
+        f.write(_default_config_yaml(template_name, structured, source_lang))
 
     return {
         "main_path": main_path,
-        "other_path": other_path,
+        "other_path": written_other_path,
         "config_path": config_path,
         "source_language": source_lang,
         "target_language": target_lang,
@@ -730,9 +789,72 @@ def _read_file(path):
         return f.read()
 
 
-def build_preview_html(template_name):
-    """Build a self-contained preview HTML for the active template."""
-    template_path = template_engine.get_template_path(template_name)
+LANGUAGE_LABELS = {"cn": "中文版", "en": "英文版"}
+
+
+def resolve_template_preview_files(template_name):
+    """解析模板的双语预览文件，按「中文在前、英文在后」排序。
+
+    语言解析与 template_engine.render() 保持一致：优先 template_<lang>.html，
+    缺失或为空时回退到 template.html，并打印明确的中文提示。
+
+    Returns:
+        list of dict: {"language", "label", "path", "fallback"}。
+    """
+    dir_path = os.path.join(config.TEMPLATES_DIR, template_name)
+    default_path = os.path.join(dir_path, "template.html")
+
+    def _has_content(path):
+        if not os.path.exists(path):
+            return False
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                return bool(f.read().strip())
+        except OSError:
+            return False
+
+    variants = []
+    seen_paths = set()
+    for lang in ("cn", "en"):
+        label = LANGUAGE_LABELS[lang]
+        variant_path = os.path.join(dir_path, f"template_{lang}.html")
+        if _has_content(variant_path):
+            path, fallback = variant_path, False
+        elif _has_content(default_path):
+            path, fallback = default_path, True
+            if os.path.exists(variant_path):
+                print(
+                    f"⚠️ 警告：模板 '{template_name}' 的 template_{lang}.html 内容为空，"
+                    f"{label}预览将回退到 template.html。"
+                )
+            else:
+                print(
+                    f"ℹ️ 模板 '{template_name}' 缺少 template_{lang}.html，"
+                    f"{label}预览将显示默认 template.html。"
+                )
+        else:
+            print(
+                f"⚠️ 警告：模板 '{template_name}' 没有可用的{label}文件，跳过该语言预览。"
+            )
+            continue
+        if path in seen_paths:
+            continue
+        seen_paths.add(path)
+        variants.append(
+            {"language": lang, "label": label, "path": path, "fallback": fallback}
+        )
+    return variants
+
+
+def build_preview_html(template_name, language=None):
+    """Build a self-contained preview HTML for the active template.
+
+    Args:
+        template_name: template directory name under templates/email.
+        language: optional "cn"/"en" to preview a specific language variant
+            (same resolution rules as template_engine.render()).
+    """
+    template_path = template_engine.get_template_path(template_name, language)
     if not os.path.exists(template_path):
         html = f"<p><em>Template HTML not found for '{template_name}'.</em></p>"
     else:
@@ -758,18 +880,22 @@ def build_preview_html(template_name):
         html,
     )
 
+    language_note = ""
+    if language:
+        language_note = f" — {LANGUAGE_LABELS.get(language, language)}"
+
     return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Template Preview: {template_name}</title>
+    <title>Template Preview: {template_name}{language_note}</title>
     <style>
         body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; max-width: 720px; margin: 40px auto; padding: 20px; line-height: 1.6; }}
         .banner {{ background: #d1ecf1; padding: 12px 16px; border-radius: 6px; margin-bottom: 24px; }}
     </style>
 </head>
 <body>
-    <div class="banner"><strong>Preview mode</strong> — variables are highlighted. Confirm in the terminal to activate this template.</div>
+    <div class="banner"><strong>Preview mode{language_note}</strong> — variables are highlighted. Confirm in the terminal to activate this template.</div>
     {html}
 </body>
 </html>

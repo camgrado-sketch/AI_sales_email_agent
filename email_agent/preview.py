@@ -263,9 +263,31 @@ def open_draft_preview(draft):
 
 
 def open_template_preview(template_name):
-    """Open a browser preview of an active template with placeholders highlighted."""
-    preview_html = template_importer.build_preview_html(template_name)
-    return _open_html(preview_html, suffix="_template.html")
+    """Open browser previews of an active template, one window per language.
+
+    Language variants are opened sequentially (Chinese first, English second)
+    so the user can review both versions before confirming the template.
+
+    Returns:
+        List of opened temp-file paths (may be empty when no file is available).
+    """
+    variants = template_importer.resolve_template_preview_files(template_name)
+    if not variants:
+        print(f"⚠️ 模板 '{template_name}' 没有可用的模板文件，无法打开预览。")
+        return []
+
+    paths = []
+    total = len(variants)
+    for index, variant in enumerate(variants, start=1):
+        if total > 1:
+            print(f"\n🔍 正在打开{variant['label']}模板预览（{index}/{total}）...")
+        preview_html = template_importer.build_preview_html(
+            template_name, language=variant["language"]
+        )
+        paths.append(
+            _open_html(preview_html, suffix=f"_template_{variant['language']}.html")
+        )
+    return paths
 
 
 def open_replies_preview(replies):
