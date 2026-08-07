@@ -38,6 +38,8 @@ playwright install chromium
 
 > `httpx==0.27.2` 的 pin 必须保留，`openai==1.46.0` 与 `httpx 0.28+` 不兼容，否则会报 `Client.__init__() got an unexpected keyword argument 'proxies'`。
 
+> 模板导入功能依赖 `python-docx`（Word 文档解析）与 `pdfplumber`（PDF 文本提取），两者均已包含在 `requirements.txt` 中，上面的命令会一并安装。若你使用的是旧环境或需要单独补装，执行：`pip install python-docx pdfplumber`。
+
 ### 2. 腾讯企业邮箱权限准备
 
 1. 登录腾讯企业邮箱网页版。
