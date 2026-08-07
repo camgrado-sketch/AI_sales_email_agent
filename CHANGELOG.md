@@ -2,6 +2,15 @@
 
 ## 2026-08-06
 
+### TASK-R2：README 补充模板导入依赖说明
+
+- **修改文件**：`README.md`
+- **核心逻辑**：
+  - 在「前期环境及权限部署准备 → 1. 基础环境」章节补充说明：模板导入功能依赖 `python-docx`（Word 解析）与 `pdfplumber`（PDF 提取），两者已包含在 `requirements.txt`，随 `pip install -r requirements.txt` 一并安装；旧环境可单独补装 `pip install python-docx pdfplumber`；
+  - 收尾 2026-08-06 复合性审查报告（`docs/bug_report.md` 历史版本 98921b3）遗留的 Minor 项②。安装主命令不变。
+- **潜在风险**：无（纯文档变更）。
+- **下一步建议**：等待 R1/R2 两个 PR 合入 develop 后，进入阶段 G.1（终端 UI 与文案净化）。
+
 ### TASK-R1：修正 .gitignore 并归档人工测试记录
 
 - **修改文件**：`.gitignore`、`templates/email/.gitkeep`（新增）、`docs/manual_test_record.md`（由 `tests/人工测试_test.md` 移动归档）
