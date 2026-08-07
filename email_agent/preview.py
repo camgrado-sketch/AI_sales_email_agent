@@ -146,11 +146,13 @@ def _open_with_playwright(path, headless=False):
                 input("\n[Enter] 关闭浏览器预览并继续...")
             browser.close()
         return True
-    except Exception as e:
+    except Exception:
+        # 不向用户打印原始异常（Playwright 的英文报错通常很长），
+        # 只给出一句简短的中文提示，后续由 _open_html 继续降级处理。
         if headless:
-            print(f"⚠️ Playwright headless 截图失败：{e}")
+            print("⚠️ 预览截图生成失败。若未安装浏览器内核，请执行：playwright install chromium")
         else:
-            print(f"⚠️ Playwright headed 启动失败（可能无桌面环境）：{e}")
+            print("⚠️ 浏览器预览启动失败（未检测到本地浏览器环境），将尝试截图或手动查看。")
         return False
 
 
