@@ -1,6 +1,7 @@
 """阶段 D：变量映射、日期格式、语言判定、模板导入语言纯净规则。"""
 
 import json
+from datetime import datetime
 
 import pytest
 
@@ -52,8 +53,11 @@ def test_english_date_has_no_leading_zero(make_template, write_settings):
     write_settings({"selected_template": "var_test", "template_confirmed": True})
     customer = {"id": "c4", "name": "Dan", "location": "New York", "company": "Acme"}
     draft = email_generator.generate_for_customer(customer)
-    assert "August 6, 2026" in draft["html_body"]
-    assert "August 06, 2026" not in draft["html_body"]
+    # 动态计算期望日期（镜像 email_generator._current_date 的英文格式），避免硬编码编写日期导致跨日失败
+    now = datetime.now()
+    assert f"{now.strftime('%B')} {now.day}, {now.year}" in draft["html_body"]
+    if now.day < 10:
+        assert f"{now.strftime('%B')} {now.day:02d}, {now.year}" not in draft["html_body"]
 
 
 @pytest.mark.parametrize("loc,expected", [
