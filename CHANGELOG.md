@@ -2,6 +2,19 @@
 
 ## 2026-08-06
 
+### TASK-R1：修正 .gitignore 并归档人工测试记录
+
+- **修改文件**：`.gitignore`、`templates/email/.gitkeep`（新增）、`docs/manual_test_record.md`（由 `tests/人工测试_test.md` 移动归档）
+- **核心逻辑**：
+  - 删除 `.gitignore` 中的 `tests` 忽略规则——本分支已跟踪 11 个测试文件，该规则会静默吞掉未来新增的测试文件，造成测试套件缺口；
+  - 保留 `.claude` 忽略项（本地工具状态，不入库）；
+  - 新增 `templates/email/*` + `!templates/email/.gitkeep`：模板导入器的运行时产物不入库（镜像既有 `templates/archive/` 模式），本地 `templates/email/开发信测试/` 保留作为阶段 G.2/G.3 的缺陷复现素材；
+  - 将未跟踪的手工测试记录 `tests/人工测试_test.md` 移入 `docs/manual_test_record.md` 归档，避免与自动化测试目录混淆。
+- **潜在风险**：
+  - `templates/email/` 被整体忽略，若未来有需入库的预置邮件模板，需用 `git add -f` 或调整规则；
+  - 人工测试记录移入 `docs/` 后，原路径引用（如有）需更新。
+- **下一步建议**：继续 TASK-R2（README 补充 python-docx/pdfplumber 依赖说明），随后进入阶段 G 修复。
+
 ### 阶段 E：邮件主题非空兜底与导入后用户编辑
 
 - **修改文件**：`email_agent/template_importer.py`、`email_agent/cli_controller.py`、`prompts/template_import_prompt.md`、`tests/test_stage_e.py`
