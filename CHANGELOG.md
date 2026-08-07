@@ -2,6 +2,18 @@
 
 ## 2026-08-06
 
+### TASK-G.1：终端 UI 与文案净化
+
+- **修改文件**：`email_agent/cli_controller.py`、`email_agent/preview.py`、`tests/test_stage_g.py`（新增）
+- **核心逻辑**：
+  - **清屏机制**：所有 `menu_*` 菜单入口及设置/模板两个子菜单循环的每轮迭代起始处调用 `_clear_screen()`，保证每次进入新菜单时界面清爽；`_clear_screen()` 增加 `sys.stdout.isatty()` 守卫，非交互环境（测试/管道/重定向）自动跳过，不产生清屏转义与 TERM 噪音；
+  - **Playwright 报错净化**：`preview._open_with_playwright()` 捕获启动异常后不再打印原始英文异常栈，headed 失败输出"未检测到本地浏览器环境，将尝试截图或手动查看"，headless 失败输出含 `playwright install chromium` 指引的一句中文提示，后续降级逻辑不变；
+  - **文案统一**：模板确认/选择流程中"设为生效模板"统一为"设为当前生效模板"；经全仓 grep 确认"强制生效""覆盖自动阶段"等旧概念文案在当前代码中已无残留（早先的阶段 A 提交已移除，人工测试记录中为旧版行为）。
+- **潜在风险**：
+  - 清屏依赖 `clear`/`cls` 系统命令，极端精简容器环境可能无效但不影响功能；
+  - Playwright 失败提示不再包含异常细节，深度排障需手动运行 `playwright install chromium` 或查看日志。
+- **下一步建议**：进入 TASK-G.2（双语模板分离预览与确认）。
+
 ### 修复 test_stage_d 英文日期断言跨日失败
 
 - **修改文件**：`tests/test_stage_d.py`

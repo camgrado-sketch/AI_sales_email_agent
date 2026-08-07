@@ -8,6 +8,10 @@ from email_agent import config, data_store, sender_profile_editor, status, templ
 
 
 def _clear_screen():
+    # 仅在真实交互终端清屏；非 tty 环境（测试、管道、重定向）直接跳过，
+    # 避免向输出流写入清屏转义序列或 "TERM environment variable not set." 噪音。
+    if not sys.stdout.isatty():
+        return
     os.system("cls" if os.name == "nt" else "clear")
 
 
@@ -74,6 +78,7 @@ def _require_confirmed_template():
 
 
 def menu_generate():
+    _clear_screen()
     print("\n[生成草稿]")
     if not _require_confirmed_template():
         return
@@ -95,6 +100,7 @@ def menu_generate():
 
 
 def menu_review():
+    _clear_screen()
     print("\n[审核草稿]")
     drafts = data_store.load_drafts(status="pending")
     if not drafts:
@@ -158,6 +164,7 @@ def menu_review():
 
 
 def menu_send():
+    _clear_screen()
     print("\n[发送已审核邮件]")
     if not _require_confirmed_template():
         return
@@ -166,6 +173,7 @@ def menu_send():
 
 
 def menu_check_replies():
+    _clear_screen()
     print("\n[检查回复]")
     from email_agent.receiver import check_replies
     from email_agent.preview import open_replies_preview
@@ -207,6 +215,7 @@ def menu_check_replies():
 
 
 def menu_logs():
+    _clear_screen()
     print("\n[查看日志]")
     email_logs = data_store.load_email_logs()
     reply_logs = data_store.load_reply_logs()
@@ -221,6 +230,7 @@ def menu_logs():
 
 
 def menu_config():
+    _clear_screen()
     print("\n[配置检查]")
     active = config.get_active_model()
     sender = config.load_sender_profile()
@@ -250,6 +260,7 @@ def menu_config():
 
 
 def menu_switch_model():
+    _clear_screen()
     print("\n[切换当前模型]")
     models = config.load_available_models()
     if not models:
@@ -284,6 +295,7 @@ def menu_switch_model():
 
 
 def menu_toggle_skill():
+    _clear_screen()
     print("\n[切换 skill 模式]")
     print(f"当前模式：{config.SKILL_MODE}")
     print("  full    - 使用完整版 email_writing_skill.md（仅模板导入参考）")
@@ -307,6 +319,7 @@ def menu_toggle_skill():
 
 def menu_select_template():
     """Let the user pick which active template should be used for generation."""
+    _clear_screen()
     print("\n[选择生效模板]")
     templates = template_engine.list_templates()
     if not templates:
@@ -338,7 +351,7 @@ def menu_select_template():
     if 1 <= idx <= len(templates):
         selected = templates[idx - 1]
         config.set_selected_template(selected)
-        print(f"✅ 已选择生效模板：'{selected}'。生成草稿时将使用该模板。")
+        print(f"✅ 已设为当前生效模板：'{selected}'。生成草稿时将使用该模板。")
     else:
         print("无效编号。")
 
@@ -356,11 +369,13 @@ def _template_usage_state(template_name):
 
 
 def menu_sender_profile():
+    _clear_screen()
     sender_profile_editor.edit_sender_profile_interactive()
 
 
 def menu_settings():
     while True:
+        _clear_screen()
         _print_settings_menu()
         choice = _prompt_with_hint(
             "请选择设置项：",
@@ -389,6 +404,7 @@ def menu_settings():
 
 def menu_manage_archives():
     """List and delete archived templates organized by template_name/YYYY/MM/DD."""
+    _clear_screen()
     print("\n[管理模板归档]")
     archives = template_importer.list_archive_folders()
     if not archives:
@@ -605,12 +621,12 @@ def _confirm_template_flow():
             print(f"✅ 模板 '{name}' 已确认。")
 
             set_active = _prompt_with_hint(
-                f"是否将 '{name}' 设为生效模板？ (y/N): ",
-                "[y] 设为生效模板  [Enter/N] 仅确认，稍后手动选择"
+                f"是否将 '{name}' 设为当前生效模板？ (y/N): ",
+                "[y] 设为当前生效模板  [Enter/N] 仅确认，稍后手动选择"
             ).strip().lower()
             if set_active == "y":
                 config.set_selected_template(name)
-                print(f"✅ '{name}' 已设为生效模板。")
+                print(f"✅ '{name}' 已设为当前生效模板。")
         else:
             print("模板保持未确认。生成和发送已被阻断。")
         return
@@ -628,6 +644,7 @@ def _confirm_template_flow():
 
 
 def menu_import_template():
+    _clear_screen()
     print("\n[导入 / 确认模板]")
 
     # Detect stale import state when active templates are gone
@@ -645,6 +662,7 @@ def menu_import_template():
             return
 
     while True:
+        _clear_screen()
         templates = template_engine.list_templates()
         print("\n当前激活模板：")
         if templates:
@@ -689,6 +707,7 @@ def menu_import_template():
 
 
 def menu_delete_drafts():
+    _clear_screen()
     print("\n[删除草稿]")
     drafts = data_store.load_drafts()
     if not drafts:
