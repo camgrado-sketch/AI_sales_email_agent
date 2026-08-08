@@ -125,7 +125,8 @@ def create_email_message(draft):
     msg["To"] = recipient
     msg["Subject"] = Header(subject, "utf-8")
 
-    domain = config.EMAIL_ACCOUNT.split("@")[1] if "@" in config.EMAIL_ACCOUNT else "local"
+    account = config.EMAIL_ACCOUNT or ""
+    domain = account.split("@")[1] if "@" in account else "local"
     msg_id = make_msgid(domain=domain)
     msg["Message-ID"] = msg_id
 

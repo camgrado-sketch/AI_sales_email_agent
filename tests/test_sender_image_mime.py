@@ -122,3 +122,18 @@ def test_send_email_logs_failure_on_unrecognizable_image(monkeypatch):
     assert logs and logs[-1]["status"] == "failed"
     assert "邮件构建失败" in logs[-1]["error_msg"]
     assert "无法识别图片格式" in logs[-1]["error_msg"]
+
+
+def test_create_email_message_tolerates_missing_email_account(monkeypatch):
+    """CI 等无 .env 环境：EMAIL_ACCOUNT 为 None 时构建不崩溃，域回退 local。"""
+    monkeypatch.setattr(config, "EMAIL_ACCOUNT", None)
+    draft = {
+        "email": "to@example.com",
+        "subject": "S",
+        "html_body": "<p>hi</p>",
+        "text_body": "t",
+        "images": [],
+    }
+    msg, msg_id = sender.create_email_message(draft)
+    assert msg["Message-ID"] == msg_id
+    assert msg_id.endswith("@local>")
