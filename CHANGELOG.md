@@ -2,6 +2,14 @@
 
 ## 2026-08-08
 
+### 修复：恢复 PR #14 合并冲突解决时丢失的 CHANGELOG 条目
+
+- **修改文件**：`CHANGELOG.md`
+- **核心逻辑**：PR #15 合并解决与 PR #14 的 `## 2026-08-08` 头冲突时，PR #14 完整条目丢失；本 PR 自 `origin/fix/issue-image-mime:CHANGELOG.md` 逐字恢复，保持"最新在上"顺序（#15 条目在上、#14 条目在下）。
+- **验证**（合并后 develop 全量验证，TASK-R4 预演）：pytest 120/120（基线 90 + G.3 新增 8 + MIME 新增 14 + 双语标题/图片新增 8）；flake8 硬门禁（E9,F63,F7,F82）零命中；`py_compile` 全量通过；用真实 ICC-JPEG 素材 `信01_img_01.jpg`（`ffd8ffe2` APP2 头，即原崩溃触发字节）端到端构建邮件冒烟：正确产出 `image/jpeg` 部件与 ASCII Content-ID，不再抛 `TypeError: Could not guess image MIME subtype`。
+- **潜在风险**：无（纯文档变更）。
+- **下一步建议**：进入 TASK-G.4（Web UI 预研，docs-only，届时一并评估留档的方案 3 Pillow 管线）；完成后进入 develop→main 发布流程（R3 人工合并 / R5 合并后验证）。
+
 ### 修复：英文邮件标题混入中文 + 发送邮件残留占位符装饰框（双语标题与图片渲染加固）
 
 - **修改文件**：`email_agent/email_generator.py`、`email_agent/template_engine.py`、`email_agent/template_importer.py`、`email_agent/cli_controller.py`、`prompts/template_import_prompt.md`、`tests/test_subject_image_render.py`（新增）
