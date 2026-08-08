@@ -51,14 +51,62 @@ def _image_ext_from_content_type(content_type):
     return mapping.get(content_type, ".png")
 
 
+def _images_used_by_active_drafts(template_name=None):
+    """Collect image filenames referenced by 待审核/待发送 drafts.
+
+    待审核 = review_status == "pending"；待发送 = review_status == "approved"
+    且尚无成功发送记录。这些草稿引用的图片资源在重新导入模板时不得删除，
+    否则未发送的邮件将丢失图片。
+    """
+    protected = set()
+    drafts = data_store.load_drafts()
+    if not drafts:
+        return protected
+    sent_ids = data_store.get_sent_draft_ids()
+    for draft in drafts:
+        draft_template = draft.get("template")
+        if (
+            template_name
+            and draft_template
+            and draft_template != template_name
+        ):
+            continue
+        review_status = draft.get("review_status")
+        pending_review = review_status == "pending"
+        pending_send = review_status == "approved" and (
+            draft.get("draft_id") not in sent_ids
+        )
+        if not (pending_review or pending_send):
+            continue
+        for img in draft.get("images") or []:
+            img_path = img.get("path", "") if isinstance(img, dict) else ""
+            if img_path:
+                protected.add(os.path.basename(img_path))
+    return protected
+
+
 def _cleanup_template_images(template_name):
-    """Remove images from assets/images/ that belong to a previous import of template_name."""
+    """Remove images from assets/images/ that belong to a previous import of template_name.
+
+    被"待审核"或"待发送"草稿引用的图片禁止删除，避免未发送邮件丢失图片资源。
+    """
     if not os.path.exists(config.IMAGES_DIR):
         return
+    protected = _images_used_by_active_drafts(template_name)
     prefix = f"{template_name}_img_"
+    kept = 0
     for fname in os.listdir(config.IMAGES_DIR):
-        if fname.startswith(prefix):
-            os.remove(os.path.join(config.IMAGES_DIR, fname))
+        if not fname.startswith(prefix):
+            continue
+        if fname in protected:
+            kept += 1
+            continue
+        os.remove(os.path.join(config.IMAGES_DIR, fname))
+    if kept:
+        print(
+            f"⚠️ 有 {kept} 张图片正被待审核/待发送的草稿引用，已保留，"
+            "避免邮件图片丢失。"
+        )
 
 
 def _template_name_from_filename(filename):
@@ -150,6 +198,40 @@ def _docx_to_markdown(path, template_name=None):
 
     base_name = template_name or _template_name_from_filename(os.path.basename(path)) or "template"
     image_counter = 0
+    extracted_partnames = set()
+
+    def resolve_image_part(rel_id):
+        """Resolve an image part by relationship id.
+
+        Primary lookup is doc.part.related_parts; the rels-table fallback
+        covers embedding styles produced by different Word versions where
+        the part is not surfaced through related_parts.
+        """
+        if not rel_id:
+            return None
+        image_part = doc.part.related_parts.get(rel_id)
+        if image_part is not None:
+            return image_part
+        rel = doc.part.rels.get(rel_id)
+        if rel is not None and not getattr(rel, "is_external", True):
+            return rel.target_part
+        return None
+
+    def save_image_part(image_part):
+        nonlocal image_counter
+        image_counter += 1
+        image_name = f"{base_name}_img_{image_counter:02d}"
+        ext = _image_ext_from_content_type(image_part.content_type)
+        image_path = os.path.join(config.IMAGES_DIR, f"{image_name}{ext}")
+        with open(image_path, "wb") as f:
+            f.write(image_part.blob)
+        extracted_partnames.add(str(image_part.partname))
+        return image_name
+
+    drawing_tag = qn("w:drawing")
+    drawingml_ns = "http://schemas.openxmlformats.org/drawingml/2006/main"
+    blip_xpath = f".//{{{drawingml_ns}}}blip"
+    imagedata_xpath = ".//{urn:schemas-microsoft-com:vml}imagedata"
 
     lines = []
     for para in doc.paragraphs:
@@ -157,8 +239,14 @@ def _docx_to_markdown(path, template_name=None):
         parts = []
         for run in para.runs:
             run_text = run.text
-            drawings = run._element.findall(qn("w:drawing"))
-            if not drawings:
+            # Descendant search: newer Word versions wrap drawings in
+            # mc:AlternateContent, so direct-child lookup would miss them.
+            drawings = run._element.findall(".//" + drawing_tag)
+            # Legacy VML images (w:pict / v:imagedata) only matter when the run
+            # has no modern drawing; otherwise the mc:Fallback copy would be a
+            # duplicate of the same image.
+            imagedata_list = [] if drawings else run._element.findall(imagedata_xpath)
+            if not drawings and not imagedata_list:
                 if run_text:
                     parts.append(run_text)
                 continue
@@ -167,26 +255,23 @@ def _docx_to_markdown(path, template_name=None):
             if run_text:
                 parts.append(run_text)
 
-            for drawing in drawings:
-                blip = drawing.find(
-                    ".//{http://schemas.openxmlformats.org/drawingml/2006/main}blip"
-                )
-                if blip is None:
-                    continue
-                embed = blip.get(qn("r:embed"))
-                if not embed:
-                    continue
-                image_part = doc.part.related_parts.get(embed)
-                if not image_part:
-                    continue
-
-                image_counter += 1
-                image_name = f"{base_name}_img_{image_counter:02d}"
-                ext = _image_ext_from_content_type(image_part.content_type)
-                image_path = os.path.join(config.IMAGES_DIR, f"{image_name}{ext}")
-                with open(image_path, "wb") as f:
-                    f.write(image_part.blob)
-                parts.append(f"{{{{IMAGE:{image_name}}}}}")
+            if drawings:
+                for drawing in drawings:
+                    # Every blip (group shapes contain several).
+                    for blip in drawing.findall(blip_xpath):
+                        rel_id = blip.get(qn("r:embed")) or blip.get(qn("r:link"))
+                        image_part = resolve_image_part(rel_id)
+                        if image_part is None:
+                            continue
+                        image_name = save_image_part(image_part)
+                        parts.append(f"{{{{IMAGE:{image_name}}}}}")
+            else:
+                for imagedata in imagedata_list:
+                    image_part = resolve_image_part(imagedata.get(qn("r:id")))
+                    if image_part is None:
+                        continue
+                    image_name = save_image_part(image_part)
+                    parts.append(f"{{{{IMAGE:{image_name}}}}}")
 
         para_text = "".join(parts).strip()
         if not para_text:
@@ -197,6 +282,30 @@ def _docx_to_markdown(path, template_name=None):
             lines.append(f"{prefix} {para_text}")
         else:
             lines.append(para_text)
+
+    # Safety net: walk every image part in the package so images anchored in
+    # tables, text boxes, headers/footers, or other structures outside
+    # doc.paragraphs are never silently lost. /docProps/ thumbnails are not
+    # body content and are excluded.
+    orphans = []
+    for part in doc.part.package.iter_parts():
+        content_type = getattr(part, "content_type", None) or ""
+        if not content_type.startswith("image/"):
+            continue
+        partname = str(part.partname)
+        if partname.startswith("/docProps/"):
+            continue
+        if partname in extracted_partnames:
+            continue
+        image_name = save_image_part(part)
+        orphans.append(image_name)
+    if orphans:
+        print(
+            f"⚠️ 警告：发现 {len(orphans)} 张未在正文段落中定位到的图片"
+            f"（可能位于表格、文本框或页眉页脚），已追加到模板末尾："
+            + "、".join(orphans)
+        )
+        lines.extend(f"{{{{IMAGE:{name}}}}}" for name in orphans)
 
     return "\n\n".join(lines)
 
