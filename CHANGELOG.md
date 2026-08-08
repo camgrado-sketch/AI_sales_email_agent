@@ -2,6 +2,14 @@
 
 ## 2026-08-08
 
+### 修复：恢复 PR #14 合并冲突解决时丢失的 CHANGELOG 条目
+
+- **修改文件**：`CHANGELOG.md`
+- **核心逻辑**：PR #15 合并解决与 PR #14 的 `## 2026-08-08` 头冲突时，PR #14 完整条目丢失；本 PR 自 `origin/fix/issue-image-mime:CHANGELOG.md` 逐字恢复，保持"最新在上"顺序（#15 条目在上、#14 条目在下）。
+- **验证**（合并后 develop 全量验证，TASK-R4 预演）：pytest 120/120（基线 90 + G.3 新增 8 + MIME 新增 14 + 双语标题/图片新增 8）；flake8 硬门禁（E9,F63,F7,F82）零命中；`py_compile` 全量通过；用真实 ICC-JPEG 素材 `信01_img_01.jpg`（`ffd8ffe2` APP2 头，即原崩溃触发字节）端到端构建邮件冒烟：正确产出 `image/jpeg` 部件与 ASCII Content-ID，不再抛 `TypeError: Could not guess image MIME subtype`。
+- **潜在风险**：无（纯文档变更）。
+- **下一步建议**：进入 TASK-G.4（Web UI 预研，docs-only，届时一并评估留档的方案 3 Pillow 管线）；完成后进入 develop→main 发布流程（R3 人工合并 / R5 合并后验证）。
+
 ### 修复：英文邮件标题混入中文 + 发送邮件残留占位符装饰框（双语标题与图片渲染加固）
 
 - **修改文件**：`email_agent/email_generator.py`、`email_agent/template_engine.py`、`email_agent/template_importer.py`、`email_agent/cli_controller.py`、`prompts/template_import_prompt.md`、`tests/test_subject_image_render.py`（新增）
@@ -19,6 +27,22 @@
   - 非 ASCII 图片名的 cid 改为 `img_NN`，drafts.json 中历史草稿的旧中文 cid 与正文引用不受影响（渲染与附件始终同批生成、同源一致）；
   - 与 PR #14（图片 MIME 魔数识别，含 ICC-JPEG 修复）为姊妹修复：本分支 sender 仍为 develop 版本，端到端测试已用 JFIF 头图片规避；两 PR 合并时 CHANGELOG 的 `## 2026-08-08` 头可能冲突，按「最新在上、保留双方条目」rebase 解决。
 - **下一步建议**：合并 PR #14 与本 PR 后进入 TASK-G.4（Web UI 预研，届时一并评估已留档的方案 3 Pillow 图片管线）。
+
+### 修复：图片附件 MIME 探测加固（ICC 配置 JPEG 导致发送崩溃）
+
+- **修改文件**：`email_agent/sender.py`、`tests/test_sender_image_mime.py`（新增）
+- **问题定位**：发送含图邮件时 `MIMEImage(img_data)` 抛 `TypeError: Could not guess image MIME subtype` 且进程崩溃。根因：`MIMEImage` 依赖标准库 `imghdr.what()`，其 `test_jpeg` 仅识别 JFIF/Exif APP 标记与 `\xff\xd8\xff\xdb` 裸 DQT 开头；本项目 docx 提取图片为**内嵌 ICC 色彩配置的 JPEG**（APP2/`0xFFE2` 开头），两条判定全部落空。已用真实素材 `assets/images/信01_img_*.jpg` 复现（`imghdr` 返回 `None`）。另发现：崩溃点在 `send_email` 的 try/except 之外，失败不落 `email_logs.csv` 且中断整个发送队列。
+- **核心逻辑**：
+  - 新增 `sender.guess_image_subtype(img_data, path)`：魔数优先（JPEG 按 `\xff\xd8\xff` SOI 通配判定，不限 APP 标记；另覆盖 PNG/GIF/WebP/BMP/TIFF/ICO/SVG），扩展名兜底，均失败则抛出指明具体文件与开头字节的中文 `ValueError`；彻底移除对已弃用（Python 3.13 将移除）的 `imghdr` 的隐式依赖；
+  - `_attach_images()` 改为 `MIMEImage(img_data, _subtype=guess结果)`，CID/inline 逻辑不变；
+  - `send_email()` 将 `create_email_message()` 纳入独立 try/except：构建失败 → 记 failed 日志（含"邮件构建失败"与具体原因）、跳过该封、队列继续。
+- **潜在风险**：
+  - 扩展名兜底在"魔数未知 + 扩展名已知"时信任扩展名（改名文件可能发出错误 Content-Type，属低概率运维风险）；
+  - SVG 探测仅按 XML/`<svg` 头部粗判，主流邮件客户端对 SVG 渲染支持有限，建议素材仍用位图；
+  - `send_email()` 失败路径新增一种 error_msg 前缀（"邮件构建失败："），依赖日志文本匹配的下游需注意（当前无此类消费方）。
+- **验证**：pytest 104/104（新增 14 例：ICC-JPEG 根因回归、常见格式探测、扩展名兜底、未知格式中文异常、端到端 CID 附件、构建失败隔离）；flake8 硬门禁（E9,F63,F7,F82）零命中；sender.py 风格告警与 develop 基线持平（11）。
+- **留档（方案 3，本次未实施）**：引入 Pillow 做 `Image.open()` 识别与自动转码（SVG/HEIC/CMYK → RGB PNG 后再附件），并作为 G.4 Web UI 用户上传校验管线的基础；代价为新增重量级二进制依赖，留待 TASK-G.4 预研时在 `docs/architecture.md` 一并评估。
+- **下一步建议**：合并本 PR 后，重新发送 `信01` 草稿验证真实邮件渲染；随后进入 TASK-G.4（Web UI 预研）。
 
 ## 2026-08-07
 
