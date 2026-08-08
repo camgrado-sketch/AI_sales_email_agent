@@ -1,5 +1,23 @@
 # CHANGELOG
 
+## 2026-08-08
+
+### 修复：图片附件 MIME 探测加固（ICC 配置 JPEG 导致发送崩溃）
+
+- **修改文件**：`email_agent/sender.py`、`tests/test_sender_image_mime.py`（新增）
+- **问题定位**：发送含图邮件时 `MIMEImage(img_data)` 抛 `TypeError: Could not guess image MIME subtype` 且进程崩溃。根因：`MIMEImage` 依赖标准库 `imghdr.what()`，其 `test_jpeg` 仅识别 JFIF/Exif APP 标记与 `\xff\xd8\xff\xdb` 裸 DQT 开头；本项目 docx 提取图片为**内嵌 ICC 色彩配置的 JPEG**（APP2/`0xFFE2` 开头），两条判定全部落空。已用真实素材 `assets/images/信01_img_*.jpg` 复现（`imghdr` 返回 `None`）。另发现：崩溃点在 `send_email` 的 try/except 之外，失败不落 `email_logs.csv` 且中断整个发送队列。
+- **核心逻辑**：
+  - 新增 `sender.guess_image_subtype(img_data, path)`：魔数优先（JPEG 按 `\xff\xd8\xff` SOI 通配判定，不限 APP 标记；另覆盖 PNG/GIF/WebP/BMP/TIFF/ICO/SVG），扩展名兜底，均失败则抛出指明具体文件与开头字节的中文 `ValueError`；彻底移除对已弃用（Python 3.13 将移除）的 `imghdr` 的隐式依赖；
+  - `_attach_images()` 改为 `MIMEImage(img_data, _subtype=guess结果)`，CID/inline 逻辑不变；
+  - `send_email()` 将 `create_email_message()` 纳入独立 try/except：构建失败 → 记 failed 日志（含"邮件构建失败"与具体原因）、跳过该封、队列继续。
+- **潜在风险**：
+  - 扩展名兜底在"魔数未知 + 扩展名已知"时信任扩展名（改名文件可能发出错误 Content-Type，属低概率运维风险）；
+  - SVG 探测仅按 XML/`<svg` 头部粗判，主流邮件客户端对 SVG 渲染支持有限，建议素材仍用位图；
+  - `send_email()` 失败路径新增一种 error_msg 前缀（"邮件构建失败："），依赖日志文本匹配的下游需注意（当前无此类消费方）。
+- **验证**：pytest 104/104（新增 14 例：ICC-JPEG 根因回归、常见格式探测、扩展名兜底、未知格式中文异常、端到端 CID 附件、构建失败隔离）；flake8 硬门禁（E9,F63,F7,F82）零命中；sender.py 风格告警与 develop 基线持平（11）。
+- **留档（方案 3，本次未实施）**：引入 Pillow 做 `Image.open()` 识别与自动转码（SVG/HEIC/CMYK → RGB PNG 后再附件），并作为 G.4 Web UI 用户上传校验管线的基础；代价为新增重量级二进制依赖，留待 TASK-G.4 预研时在 `docs/architecture.md` 一并评估。
+- **下一步建议**：合并本 PR 后，重新发送 `信01` 草稿验证真实邮件渲染；随后进入 TASK-G.4（Web UI 预研）。
+
 ## 2026-08-07
 
 ### TASK-G.3：docx 图片提取与清理机制加固
