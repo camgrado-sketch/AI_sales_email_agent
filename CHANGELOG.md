@@ -2,6 +2,14 @@
 
 ## 2026-08-08
 
+### 发布：v1.0.0 正式版（develop → main，tag v1.0.0）
+
+- **里程碑**：阶段 A–G 全部代码经发布 PR #22 合入 main（合并提交 `45ad74a`），打标签 `v1.0.0`。闭环流程：客户读取 → LLM 销售阶段分析 → 双语 HTML 邮件草稿 → 终端审核 → SMTP 发送 → IMAP 回复采集。
+- **发布内容**：阶段 A–F 核心功能；阶段 G 修复（G.1 终端 UI / G.2 双语预览 / G.3 docx 图片提取）；现网缺陷修复（#14 MIME 魔数探测、#15 双语标题与图片渲染）；工程修复（R1 .gitignore、R2 README、#16 CHANGELOG 恢复、#20 pytest pythonpath、#23 EMAIL_ACCOUNT None 防护）；TASK-G.4 Web UI 预研文档（#21）。
+- **验证（R4+R5）**：main CI 全绿；本地 main 全量 121 passed；flake8 硬门禁 0 命中；py_compile 通过；.gitignore/CHANGELOG 生效确认；`merge-tree` 预演零冲突；用户人工黑盒测试跑通。
+- **过程记录**：原发布 PR #17 因 CI 裸 pytest 缺 pythonpath 失败而关闭，修复（#20）后经重建路径（#21→#22）发布；期间处理本地 main 分叉（备份分支 `backup/local-main-a60af52`）与 G.4 分支 rebase。
+- **下一步建议**：①人工冒烟复测 6 项（模板选择持久化 / 状态栏两行 / Shanghai→cn / 标题变量替换 / 无 GUI 预览降级 / 清屏与双语预览）；②若立项 Web UI，先做 data_store 并发加固（architecture.md §11.3 HIGH 风险前置项）。
+
 ### 修复：CI 环境 EMAIL_ACCOUNT 未配置时邮件构建 TypeError（sender.py None 防护）
 
 - **修改文件**：`email_agent/sender.py`、`tests/test_sender_image_mime.py`
