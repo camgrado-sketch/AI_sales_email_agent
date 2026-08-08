@@ -22,6 +22,23 @@
 
 ## 2026-08-07
 
+### TASK-G.3：docx 图片提取与清理机制加固
+
+- **修改文件**：`email_agent/template_importer.py`、`prompts/template_import_prompt.md`、`tests/test_stage_g.py`
+- **核心逻辑**：
+  - **提取加固（`_docx_to_markdown`）**：
+    - drawing 查找由"仅直接子元素"改为后代搜索，兼容 Word 2010+ 用 `mc:AlternateContent` 包裹图片的嵌入方式（此前该类文档的图片被整条跳过，即"部分 Word 版本取不到图"的主因）；run 内无现代 drawing 时才回退解析旧版 VML（`w:pict`/`v:imagedata`），避免 Choice/Fallback 双份引用造成重复提取；
+    - blip 改为遍历 drawing 下全部（组合图形含多个），并同时支持 `r:embed` 与 `r:link` 两种引用；`related_parts.get()` 失败时增加 rels 表兜底解析；
+    - 新增包级兜底扫描：遍历文档包全部图片部件，表格、文本框、页眉页脚等 `doc.paragraphs` 之外的图片不再静默丢失（追加占位符至模板末尾并打印中文警告；`/docProps/` 缩略图不属于正文内容，明确排除）；
+  - **图片丢失 Bug 修复（`_cleanup_template_images`）**：新增 `_images_used_by_active_drafts()`，收集"待审核"（`review_status=pending`）与"待发送"（`approved` 且无成功发送记录）草稿引用的图片文件名；重新导入模板清理旧图片时，被引用的图片禁止删除并打印保留提示，其余正常清理；
+  - **prompt 强化（`template_import_prompt.md`）**：新增"占位符位置锁定（强制）"规则与对应禁止事项——`{{IMAGE:...}}`/`{{FILE:...}}` 占位符数量不得增减、相对位置不得移动、禁止合并拆分改名，双语版本与 `images`/`files` 列表必须逐一对应，返回前逐个自检。
+- **潜在风险**：
+  - 兜底扫描会把页眉/页脚中的图片（如公司 Logo）也提取并追加到 Markdown 末尾，属"宁多勿漏"的设计取舍，终端有明确警告；
+  - 兜底提取的图片占位符位于 Markdown 末尾而非原文位置，依赖 LLM 按 prompt 约束保留；
+  - 图片保护按草稿 `template` 字段过滤，历史草稿若缺失该字段则视为可能匹配而保留其图片（保守策略）。
+- **验证**：pytest 98/98 全绿（新增 8 个 G.3 测试：inline 提取、AlternateContent 包裹回归、表格图片兜底、真实素材 `开发信带图版.docx` 端到端、清理保护 4 例）；flake8 硬门禁（E9,F63,F7,F82）零命中；两文件风格告警数与 develop 基线持平（54/18）。
+- **下一步建议**：TASK-G.3 合入后进入 TASK-G.4（Web UI 预研，仅架构文档）。
+
 ### TASK-G.2：双语模板分离预览与确认
 
 - **修改文件**：`email_agent/template_importer.py`、`email_agent/preview.py`、`email_agent/cli_controller.py`、`tests/test_stage_g.py`

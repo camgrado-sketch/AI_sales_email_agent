@@ -1,13 +1,17 @@
-"""阶段 G：体验优化与图片提取加固（G.1 终端 UI 与文案净化；G.2 双语分离预览）。"""
+"""阶段 G：体验优化与图片提取加固（G.1 终端 UI；G.2 双语分离预览；G.3 docx 图片提取与清理）。"""
 
+import csv
+import io
 import json
 import os
+import struct
 import sys
 import types
+import zlib
 
 import pytest
 
-from email_agent import config, preview, template_importer
+from email_agent import config, data_store, preview, template_importer
 
 
 @pytest.mark.parametrize("headless,expected_hint", [
@@ -240,3 +244,211 @@ def test_write_structured_template_empty_target_skips_file(isolated_env, capsys)
     with open(result["config_path"], "r", encoding="utf-8") as f:
         cfg = yaml.safe_load(f)
     assert cfg["source_language"] == "en"
+
+
+# ------------------------------------------------------------------------------
+# G.3 docx 图片提取加固
+# ------------------------------------------------------------------------------
+
+def _png_bytes():
+    """Generate a minimal valid 1x1 PNG (python-docx validates structure)."""
+    def chunk(typ, data):
+        return (
+            struct.pack(">I", len(data)) + typ + data
+            + struct.pack(">I", zlib.crc32(typ + data) & 0xFFFFFFFF)
+        )
+    ihdr = struct.pack(">IIBBBBB", 1, 1, 8, 2, 0, 0, 0)
+    idat = zlib.compress(b"\x00\xff\x00\x00")
+    return (
+        b"\x89PNG\r\n\x1a\n"
+        + chunk(b"IHDR", ihdr) + chunk(b"IDAT", idat) + chunk(b"IEND", b"")
+    )
+
+
+def test_docx_inline_image_extracted_with_placeholder(isolated_env):
+    """G.3：inline 图片被提取到 assets/images/，占位符保留在原文位置。"""
+    import docx
+
+    doc = docx.Document()
+    doc.add_paragraph("Hello before")
+    doc.add_paragraph().add_run().add_picture(io.BytesIO(_png_bytes()))
+    doc.add_paragraph("World after")
+    src = os.path.join(config.TEMPLATE_IMPORT_DIR, "src.docx")
+    doc.save(src)
+
+    markdown = template_importer._docx_to_markdown(src, template_name="t")
+
+    assert "{{IMAGE:t_img_01}}" in markdown
+    assert (
+        markdown.index("Hello before")
+        < markdown.index("{{IMAGE:t_img_01}}")
+        < markdown.index("World after")
+    )
+    assert any(f.startswith("t_img_01") for f in os.listdir(config.IMAGES_DIR))
+
+
+def test_docx_image_wrapped_in_alternate_content(isolated_env):
+    """G.3：Word 2010+ 的 mc:AlternateContent 包裹也能提取，且 Fallback 不重复提取。"""
+    import docx
+    from docx.oxml import parse_xml
+    from docx.oxml.ns import qn
+
+    doc = docx.Document()
+    run = doc.add_paragraph().add_run()
+    run.add_picture(io.BytesIO(_png_bytes()))
+    drawing = run._element.findall(qn("w:drawing"))[0]
+    rid = drawing.find(
+        ".//{http://schemas.openxmlformats.org/drawingml/2006/main}blip"
+    ).get(qn("r:embed"))
+
+    mc_ns = "http://schemas.openxmlformats.org/markup-compatibility/2006"
+    w_ns = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+    v_ns = "urn:schemas-microsoft-com:vml"
+    r_ns = (
+        "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+    )
+    ac = parse_xml(
+        f'<mc:AlternateContent xmlns:mc="{mc_ns}" xmlns:w="{w_ns}"'
+        f' xmlns:v="{v_ns}" xmlns:r="{r_ns}">'
+        '<mc:Choice Requires="w14"/>'
+        f'<mc:Fallback><w:pict><v:imagedata r:id="{rid}"/>'
+        "</w:pict></mc:Fallback></mc:AlternateContent>"
+    )
+    run._element.remove(drawing)
+    ac.find(
+        "{http://schemas.openxmlformats.org/markup-compatibility/2006}Choice"
+    ).append(drawing)
+    run._element.append(ac)
+
+    src = os.path.join(config.TEMPLATE_IMPORT_DIR, "ac.docx")
+    doc.save(src)
+
+    markdown = template_importer._docx_to_markdown(src, template_name="t")
+
+    # 恰好提取一次：Fallback 中的 VML 副本不得造成重复占位符
+    assert markdown.count("{{IMAGE:") == 1
+    assert "{{IMAGE:t_img_01}}" in markdown
+    assert any(f.startswith("t_img_01") for f in os.listdir(config.IMAGES_DIR))
+
+
+def test_docx_image_in_table_recovered_by_sweep(isolated_env, capsys):
+    """G.3：表格内图片不在 doc.paragraphs 中，兜底扫描必须提取并给出警告。"""
+    import docx
+
+    doc = docx.Document()
+    doc.add_paragraph("正文段落")
+    table = doc.add_table(rows=1, cols=1)
+    cell_para = table.cell(0, 0).paragraphs[0]
+    cell_para.add_run().add_picture(io.BytesIO(_png_bytes()))
+    src = os.path.join(config.TEMPLATE_IMPORT_DIR, "tbl.docx")
+    doc.save(src)
+
+    markdown = template_importer._docx_to_markdown(src, template_name="t")
+    out = capsys.readouterr().out
+
+    assert "{{IMAGE:t_img_01}}" in markdown
+    assert "未在正文段落中定位到" in out
+    assert any(f.startswith("t_img_01") for f in os.listdir(config.IMAGES_DIR))
+
+
+REPRO_DOCX = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    "templates", "import", "开发信带图版.docx",
+)
+
+
+@pytest.mark.skipif(
+    not os.path.exists(REPRO_DOCX), reason="缺少人工测试素材 开发信带图版.docx"
+)
+def test_docx_real_repro_file_extracts_images(isolated_env):
+    """G.3 验收：人工黑盒测试的含图 docx 必须提取出图片，占位符与落盘文件一一对应。"""
+    markdown = template_importer._docx_to_markdown(
+        REPRO_DOCX, template_name="repro"
+    )
+
+    assert "{{IMAGE:" in markdown
+    extracted = [
+        f for f in os.listdir(config.IMAGES_DIR) if f.startswith("repro_img_")
+    ]
+    assert len(extracted) >= 1
+    assert markdown.count("{{IMAGE:") == len(extracted)
+
+
+# ------------------------------------------------------------------------------
+# G.3 图片清理保护（待审核/待发送草稿引用图片禁止删除）
+# ------------------------------------------------------------------------------
+
+def _seed_image(fname):
+    path = os.path.join(config.IMAGES_DIR, fname)
+    with open(path, "wb") as f:
+        f.write(b"x")
+    return path
+
+
+def _seed_draft(draft_id, template, status, image_fname):
+    drafts = data_store.load_drafts()
+    drafts.append({
+        "draft_id": draft_id,
+        "template": template,
+        "review_status": status,
+        "images": [{
+            "cid": os.path.splitext(image_fname)[0],
+            "path": os.path.join(config.IMAGES_DIR, image_fname),
+        }],
+    })
+    data_store.save_drafts(drafts)
+
+
+def _mark_sent(draft_id):
+    with open(config.EMAIL_LOGS_FILE, "w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=config.EMAIL_LOG_HEADERS)
+        writer.writeheader()
+        row = {h: "" for h in config.EMAIL_LOG_HEADERS}
+        row["email_id"] = draft_id
+        row["status"] = "success"
+        writer.writerow(row)
+
+
+def test_cleanup_protects_images_of_pending_drafts(isolated_env, capsys):
+    """G.3：待审核草稿引用的图片禁止删除，未被引用的正常清理。"""
+    _seed_image("t_img_01.jpg")
+    _seed_image("t_img_02.jpg")
+    _seed_draft("d1", "t", "pending", "t_img_01.jpg")
+
+    template_importer._cleanup_template_images("t")
+    out = capsys.readouterr().out
+
+    assert os.path.exists(os.path.join(config.IMAGES_DIR, "t_img_01.jpg"))
+    assert not os.path.exists(os.path.join(config.IMAGES_DIR, "t_img_02.jpg"))
+    assert "已保留" in out
+
+
+def test_cleanup_protects_images_of_approved_unsent_drafts(isolated_env):
+    """G.3：已批准但未发送（待发送）草稿引用的图片禁止删除。"""
+    _seed_image("t_img_01.jpg")
+    _seed_draft("d1", "t", "approved", "t_img_01.jpg")
+
+    template_importer._cleanup_template_images("t")
+
+    assert os.path.exists(os.path.join(config.IMAGES_DIR, "t_img_01.jpg"))
+
+
+def test_cleanup_removes_images_after_draft_sent(isolated_env):
+    """G.3：草稿已成功发送后，对应图片可正常清理。"""
+    _seed_image("t_img_01.jpg")
+    _seed_draft("d1", "t", "approved", "t_img_01.jpg")
+    _mark_sent("d1")
+
+    template_importer._cleanup_template_images("t")
+
+    assert not os.path.exists(os.path.join(config.IMAGES_DIR, "t_img_01.jpg"))
+
+
+def test_cleanup_ignores_drafts_of_other_templates(isolated_env):
+    """G.3：其他模板的待审核草稿不影响当前模板的图片清理。"""
+    _seed_image("t_img_01.jpg")
+    _seed_draft("d1", "other_template", "pending", "t_img_01.jpg")
+
+    template_importer._cleanup_template_images("t")
+
+    assert not os.path.exists(os.path.join(config.IMAGES_DIR, "t_img_01.jpg"))
