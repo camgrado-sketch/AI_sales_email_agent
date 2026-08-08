@@ -2,6 +2,15 @@
 
 ## 2026-08-08
 
+### 修复：CI 环境 EMAIL_ACCOUNT 未配置时邮件构建 TypeError（sender.py None 防护）
+
+- **修改文件**：`email_agent/sender.py`、`tests/test_sender_image_mime.py`
+- **问题定位**：发布 PR #22（develop→main）CI 运行失败，`4 failed, 116 passed`。根因：CI 无 `.env`，`config.EMAIL_ACCOUNT = os.getenv("EMAIL_ACCOUNT")` 为 `None`，`sender.py` 中 `"@" in config.EMAIL_ACCOUNT` 抛 `TypeError: argument of type 'NoneType' is not iterable`。本地因 `.env` 已配置而全部通过（120 passed），属环境差异型缺陷，由 CI 门禁首次暴露。
+- **核心逻辑**：`create_email_message` 取 `account = config.EMAIL_ACCOUNT or ""` 后再派生 Message-ID 域名（沿用 `config.py:37` 同款 `or ""` 防护惯例），未配置时域名回退 `local`，构建不再崩溃。
+- **验证**：新增回归测试（monkeypatch `EMAIL_ACCOUNT=None`）先红后绿；全量 121 passed；flake8 硬门禁 0 命中；py_compile 通过。
+- **潜在风险**：无业务行为变化——真实发送链路 `.env` 必然配置 `EMAIL_ACCOUNT`；仅消除未配置环境下的构建崩溃。
+- **下一步建议**：合并后 #22 的 CI 自动重跑，预期通过；随后打 tag v1.0.0 + R5 验证。
+
 ### 修复：CI 裸 pytest 调用 ModuleNotFoundError（pytest.ini 增加 pythonpath）
 
 - **修改文件**：`pytest.ini`
