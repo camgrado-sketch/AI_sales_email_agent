@@ -143,7 +143,10 @@ def generate_for_customer(customer, language=None, missing_vars=None):
     # Build subject from template config if it contains a declared subject_template,
     # otherwise use the template's subject_template. The template importer writes a
     # subject line into config.yaml as the first rule for reference; we render it here.
-    subject = _render_subject(template_config, variables, missing_vars=local_missing)
+    subject = _render_subject(
+        template_config, variables, missing_vars=local_missing,
+        language=chosen_language,
+    )
 
     if missing_vars is not None:
         missing_vars.extend(local_missing)
@@ -171,18 +174,22 @@ def generate_for_customer(customer, language=None, missing_vars=None):
     return draft
 
 
-def _render_subject(template_config, variables, missing_vars=None):
-    """Render the subject line template with variables.
+_CJK_RE = re.compile("[一-鿿]")
 
-    If config.yaml contains a 'subject_template' key, use it; otherwise fall back
-    to a generic subject so drafts are never sent with an empty subject.
-    Unknown variables are replaced with an empty string and collected for warning.
-    """
-    subject_template = template_config.get("subject_template", "").strip()
-    if not subject_template:
-        company = variables.get("CUSTOMER_COMPANY", "")
-        return f"Furniture partnership opportunity for {company} | GRADO Contract" if company else "GRADO Contract Partnership Opportunity"
 
+def _generic_subject(variables, language):
+    """Language-pure fallback subject when no usable template subject exists."""
+    company = str(variables.get("CUSTOMER_COMPANY", "")).strip()
+    if language == "en":
+        if company and not _CJK_RE.search(company):
+            return f"Furniture partnership opportunity for {company} | GRADO Contract"
+        return "GRADO Contract Partnership Opportunity"
+    if company:
+        return f"{company} 公共空间家具合作机会 | GRADO Contract"
+    return "GRADO Contract 公共空间家具合作机会"
+
+
+def _substitute_subject(subject_template, variables, missing_vars):
     def replace_var(match):
         var_name = match.group(1).strip().upper()
         if var_name in variables:
@@ -192,6 +199,43 @@ def _render_subject(template_config, variables, missing_vars=None):
         return ""
 
     return re.sub(r"\{\{([^{}:]+)\}\}", replace_var, subject_template)
+
+
+def _strip_dangling_connectives(subject):
+    """Clean artifacts left after dropping CJK values (e.g. 'for |', '| ')."""
+    subject = re.sub(r"\b(for|to|with|of|at)\s*(?=[|–—-]|$)", "", subject)
+    subject = re.sub(r"\s*([|–—-])\s*", r" \1 ", subject)
+    subject = re.sub(r"\s{2,}", " ", subject)
+    return subject.strip().strip("|–—-").strip()
+
+
+def _render_subject(template_config, variables, missing_vars=None, language="cn"):
+    """Render the subject line template with variables for the target language.
+
+    Prefers the language-specific variant written by the importer
+    (subject_template_cn / subject_template_en), falling back to the legacy
+    single subject_template and finally to a generic language-pure subject.
+    For English, CJK-bearing variable values are excluded and dangling
+    connectives cleaned so outbound subjects never mix Chinese into English.
+    """
+    subject_template = str(
+        template_config.get(f"subject_template_{language}", "")
+        or template_config.get("subject_template", "")
+    ).strip()
+    if not subject_template:
+        return _generic_subject(variables, language)
+
+    rendered = _substitute_subject(subject_template, variables, missing_vars)
+    if language == "en" and _CJK_RE.search(rendered):
+        ascii_vars = {
+            k: v for k, v in variables.items() if not _CJK_RE.search(str(v))
+        }
+        rendered = _strip_dangling_connectives(
+            _substitute_subject(subject_template, ascii_vars, None)
+        )
+        if not rendered or _CJK_RE.search(rendered):
+            return _generic_subject(variables, "en")
+    return rendered
 
 
 def generate_all(customers=None):

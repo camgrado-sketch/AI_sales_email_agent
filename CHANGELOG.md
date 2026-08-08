@@ -1,5 +1,25 @@
 # CHANGELOG
 
+## 2026-08-08
+
+### 修复：英文邮件标题混入中文 + 发送邮件残留占位符装饰框（双语标题与图片渲染加固）
+
+- **修改文件**：`email_agent/email_generator.py`、`email_agent/template_engine.py`、`email_agent/template_importer.py`、`email_agent/cli_controller.py`、`prompts/template_import_prompt.md`、`tests/test_subject_image_render.py`（新增）
+- **核心逻辑**：
+  - **问题 1（英文邮件标题出现中文）**：
+    - 根因：模板 schema 只有单一 `subject_template` 字段，导入时英文模板（如 信01）落盘的是中文标题；渲染侧 `_render_subject` 不区分语言，且运行期把中文客户数据（如「字节跳动」）注入英文标题；
+    - 修复：schema 与 `config.yaml` 新增 `subject_template_cn` / `subject_template_en` 双语字段；`activate_template()` 导入时自动回填缺失变体（源语言复用单字段），并丢弃含汉字的英文变体（中文警告提示）；渲染侧 `_render_subject()` 按邮件语言选取变体，旧模板回退单字段；英文标题渲染后若含汉字（来自中文变量值或遗留中文模板），剔除含汉字变量并清理悬空连接词（如 `for |` → `|`），仍含汉字则回退纯英文通用标题；
+  - **问题 2（发出的邮件显示 `[Image placeholder: …]` 文字与破图）**：
+    - 根因 a：导入 prompt 曾指示 LLM 给 `{{IMAGE:…}}` 包裹虚线占位框，装饰框随 HTML 一起发出；根因 b：中文图片名直接用作 Content-ID（如 `信01_img_01`），违反 RFC 5322/2392，客户端（Gmail 等）无法匹配 `cid:` 引用导致破图；
+    - 修复：`template_engine.render()` 加载模板后先用 `_strip_image_placeholder_chrome()` 将两种装饰框形态（`class=*placeholder*` div、`style=*dashed*` div）整框还原为裸占位符；`_make_cid()` 为非 ASCII/非法图片名生成顺序 ASCII cid（`img_01`…），合法 ASCII 名原样保留，HTML 的 `cid:` 引用与 images 列表（附件 Content-ID）同源一致；导入 prompt §HTML 输出规范改为禁止任何装饰性包裹；
+  - **配套**：`cli_controller` 用户手动改标题时同步更新源语言变体字段，避免编辑失效；新增 8 个回归测试覆盖双语选取/回退链、CJK 变量剔除、两种装饰框剥离、ASCII cid 端到端（渲染→`create_email_message`→Content-ID 头部断言）、`_default_config_yaml` 双语字段落盘。
+- **验证**：`pytest` 98 passed（基线 90 + 新增 8）；`flake8 --select=E9,F63,F7,F82` 零命中；改动文件 flake8 全量告警数均不超过 origin/develop 基线（新测试文件零告警）；`py_compile` 全量通过。
+- **潜在风险**：
+  - 装饰框剥离正则仅匹配单层 div 包裹的占位框；嵌套或异形包裹不在覆盖范围（已覆盖现行 prompt 产出的两种形态）；
+  - 非 ASCII 图片名的 cid 改为 `img_NN`，drafts.json 中历史草稿的旧中文 cid 与正文引用不受影响（渲染与附件始终同批生成、同源一致）；
+  - 与 PR #14（图片 MIME 魔数识别，含 ICC-JPEG 修复）为姊妹修复：本分支 sender 仍为 develop 版本，端到端测试已用 JFIF 头图片规避；两 PR 合并时 CHANGELOG 的 `## 2026-08-08` 头可能冲突，按「最新在上、保留双方条目」rebase 解决。
+- **下一步建议**：合并 PR #14 与本 PR 后进入 TASK-G.4（Web UI 预研，届时一并评估已留档的方案 3 Pillow 图片管线）。
+
 ## 2026-08-07
 
 ### TASK-G.2：双语模板分离预览与确认
