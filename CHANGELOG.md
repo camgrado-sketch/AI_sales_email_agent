@@ -2,6 +2,15 @@
 
 ## 2026-08-08
 
+### 修复：CI 裸 pytest 调用 ModuleNotFoundError（pytest.ini 增加 pythonpath）
+
+- **修改文件**：`pytest.ini`
+- **问题定位**：PR #17（develop→main）首次 CI 运行（Python 3.11.15 / pytest 9.1.1）在 `Test with pytest` 步骤失败：`ImportError while loading conftest` → `ModuleNotFoundError: No module named 'email_agent'`（flake8 步骤通过）。根因：CI 使用裸 `pytest` 调用，该方式不会把仓库根目录加入 `sys.path`，`tests/conftest.py` 的 `from email_agent import config` 必然失败；本地惯用 `python3 -m pytest`（cwd 入 `sys.path`）掩盖了差异。已用裸 `pytest` 在本地复现同一错误。
+- **核心逻辑**：`pytest.ini` 增加 `pythonpath = .`（pytest≥7 内建 ini 选项；requirements 钉 `pytest>=8.0.0`，兼容），两种调用方式均可用；业务代码与测试代码零改动。
+- **验证**：裸 `pytest`（与 CI 同款调用）本地 120/120 全绿；`python3 -m pytest` 120/120 全绿；flake8 硬门禁（E9,F63,F7,F82）零命中。
+- **潜在风险**：无（纯 ini 配置增量，无行为变化）。
+- **下一步建议**：本 PR 合入后 PR #17 的 CI 自动重跑；绿后按 #18 → 本 PR → #17 顺序合并（不使用 stack 合并）；review approval 阻塞需人工处理（非作者账号批准或调整分支保护）。
+
 ### 修复：恢复 PR #14 合并冲突解决时丢失的 CHANGELOG 条目
 
 - **修改文件**：`CHANGELOG.md`
