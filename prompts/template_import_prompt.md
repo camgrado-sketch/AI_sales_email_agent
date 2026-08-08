@@ -30,6 +30,8 @@
 ```json
 {
   "subject_template": "... {{CUSTOMER_FIRST_NAME}} ...",
+  "subject_template_cn": "... {{CUSTOMER_FIRST_NAME}} ...",
+  "subject_template_en": "... {{CUSTOMER_FIRST_NAME}} ...",
   "cn_html": "<!DOCTYPE html><html>...",
   "en_html": "<!DOCTYPE html><html>...",
   "variables": ["SENDER_NAME", "CUSTOMER_FIRST_NAME", "CURRENT_DATE"],
@@ -40,6 +42,7 @@
 ```
 
 6. **邮件主题生成规则**：
+   - 必须同时输出 `subject_template_cn` 与 `subject_template_en` 两个语言版本（`subject_template` 保留为源语言版本，三者中源语言两个字段内容一致），各自遵守下方语言纯净规则：`subject_template_en` 零汉字，`subject_template_cn` 品牌名二选一、不并排。
    - `subject_template` 禁止为空。若原始模板有明确标题，提取并转化为含变量的模板；若无标题，根据正文核心内容自动生成。
    - 可选择性引入以下变量，使标题与客户自然关联，**不强制全部使用**：
      - `{{CUSTOMER_COMPANY}}`：客户公司名
@@ -56,12 +59,7 @@
 - 输出完整、独立的 HTML 文档（含 `<!DOCTYPE html>`、`<html>`、`<head>`、`<body>`）；
 - 在 `<head>` 中使用简洁的内联 CSS，确保邮件在常见客户端下可读；
 - 正文最大宽度建议 `680px`，居中对齐；
-- 图片占位符位置渲染为一个带边框和提示文字的 `<div>`，例如：
-  ```html
-  <div style="border:1px dashed #ccc;padding:12px;text-align:center;">
-    [图片占位符: {{IMAGE:hero}}]
-  </div>
-  ```
+- 图片占位符在 HTML 中**原样保留** `{{IMAGE:名称}}`（单独成段即可），发送时由本地脚本自动替换为真实内联图片；**禁止**为其包裹虚线框、边框或"图片占位符/Image placeholder"等说明文字——装饰性包裹会在最终发出的邮件中残留为空框与破图。
 - 文件占位符位置渲染为带提示的下载链接：
   ```html
   <a href="{{FILE:catalog_pdf}}">[文件占位符: catalog_pdf]</a>

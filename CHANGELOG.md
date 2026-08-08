@@ -2,21 +2,23 @@
 
 ## 2026-08-08
 
-### 修复：图片附件 MIME 探测加固（ICC 配置 JPEG 导致发送崩溃）
+### 修复：英文邮件标题混入中文 + 发送邮件残留占位符装饰框（双语标题与图片渲染加固）
 
-- **修改文件**：`email_agent/sender.py`、`tests/test_sender_image_mime.py`（新增）
-- **问题定位**：发送含图邮件时 `MIMEImage(img_data)` 抛 `TypeError: Could not guess image MIME subtype` 且进程崩溃。根因：`MIMEImage` 依赖标准库 `imghdr.what()`，其 `test_jpeg` 仅识别 JFIF/Exif APP 标记与 `\xff\xd8\xff\xdb` 裸 DQT 开头；本项目 docx 提取图片为**内嵌 ICC 色彩配置的 JPEG**（APP2/`0xFFE2` 开头），两条判定全部落空。已用真实素材 `assets/images/信01_img_*.jpg` 复现（`imghdr` 返回 `None`）。另发现：崩溃点在 `send_email` 的 try/except 之外，失败不落 `email_logs.csv` 且中断整个发送队列。
+- **修改文件**：`email_agent/email_generator.py`、`email_agent/template_engine.py`、`email_agent/template_importer.py`、`email_agent/cli_controller.py`、`prompts/template_import_prompt.md`、`tests/test_subject_image_render.py`（新增）
 - **核心逻辑**：
-  - 新增 `sender.guess_image_subtype(img_data, path)`：魔数优先（JPEG 按 `\xff\xd8\xff` SOI 通配判定，不限 APP 标记；另覆盖 PNG/GIF/WebP/BMP/TIFF/ICO/SVG），扩展名兜底，均失败则抛出指明具体文件与开头字节的中文 `ValueError`；彻底移除对已弃用（Python 3.13 将移除）的 `imghdr` 的隐式依赖；
-  - `_attach_images()` 改为 `MIMEImage(img_data, _subtype=guess结果)`，CID/inline 逻辑不变；
-  - `send_email()` 将 `create_email_message()` 纳入独立 try/except：构建失败 → 记 failed 日志（含"邮件构建失败"与具体原因）、跳过该封、队列继续。
+  - **问题 1（英文邮件标题出现中文）**：
+    - 根因：模板 schema 只有单一 `subject_template` 字段，导入时英文模板（如 信01）落盘的是中文标题；渲染侧 `_render_subject` 不区分语言，且运行期把中文客户数据（如「字节跳动」）注入英文标题；
+    - 修复：schema 与 `config.yaml` 新增 `subject_template_cn` / `subject_template_en` 双语字段；`activate_template()` 导入时自动回填缺失变体（源语言复用单字段），并丢弃含汉字的英文变体（中文警告提示）；渲染侧 `_render_subject()` 按邮件语言选取变体，旧模板回退单字段；英文标题渲染后若含汉字（来自中文变量值或遗留中文模板），剔除含汉字变量并清理悬空连接词（如 `for |` → `|`），仍含汉字则回退纯英文通用标题；
+  - **问题 2（发出的邮件显示 `[Image placeholder: …]` 文字与破图）**：
+    - 根因 a：导入 prompt 曾指示 LLM 给 `{{IMAGE:…}}` 包裹虚线占位框，装饰框随 HTML 一起发出；根因 b：中文图片名直接用作 Content-ID（如 `信01_img_01`），违反 RFC 5322/2392，客户端（Gmail 等）无法匹配 `cid:` 引用导致破图；
+    - 修复：`template_engine.render()` 加载模板后先用 `_strip_image_placeholder_chrome()` 将两种装饰框形态（`class=*placeholder*` div、`style=*dashed*` div）整框还原为裸占位符；`_make_cid()` 为非 ASCII/非法图片名生成顺序 ASCII cid（`img_01`…），合法 ASCII 名原样保留，HTML 的 `cid:` 引用与 images 列表（附件 Content-ID）同源一致；导入 prompt §HTML 输出规范改为禁止任何装饰性包裹；
+  - **配套**：`cli_controller` 用户手动改标题时同步更新源语言变体字段，避免编辑失效；新增 8 个回归测试覆盖双语选取/回退链、CJK 变量剔除、两种装饰框剥离、ASCII cid 端到端（渲染→`create_email_message`→Content-ID 头部断言）、`_default_config_yaml` 双语字段落盘。
+- **验证**：`pytest` 98 passed（基线 90 + 新增 8）；`flake8 --select=E9,F63,F7,F82` 零命中；改动文件 flake8 全量告警数均不超过 origin/develop 基线（新测试文件零告警）；`py_compile` 全量通过。
 - **潜在风险**：
-  - 扩展名兜底在"魔数未知 + 扩展名已知"时信任扩展名（改名文件可能发出错误 Content-Type，属低概率运维风险）；
-  - SVG 探测仅按 XML/`<svg` 头部粗判，主流邮件客户端对 SVG 渲染支持有限，建议素材仍用位图；
-  - `send_email()` 失败路径新增一种 error_msg 前缀（"邮件构建失败："），依赖日志文本匹配的下游需注意（当前无此类消费方）。
-- **验证**：pytest 104/104（新增 14 例：ICC-JPEG 根因回归、常见格式探测、扩展名兜底、未知格式中文异常、端到端 CID 附件、构建失败隔离）；flake8 硬门禁（E9,F63,F7,F82）零命中；sender.py 风格告警与 develop 基线持平（11）。
-- **留档（方案 3，本次未实施）**：引入 Pillow 做 `Image.open()` 识别与自动转码（SVG/HEIC/CMYK → RGB PNG 后再附件），并作为 G.4 Web UI 用户上传校验管线的基础；代价为新增重量级二进制依赖，留待 TASK-G.4 预研时在 `docs/architecture.md` 一并评估。
-- **下一步建议**：合并本 PR 后，重新发送 `信01` 草稿验证真实邮件渲染；随后进入 TASK-G.4（Web UI 预研）。
+  - 装饰框剥离正则仅匹配单层 div 包裹的占位框；嵌套或异形包裹不在覆盖范围（已覆盖现行 prompt 产出的两种形态）；
+  - 非 ASCII 图片名的 cid 改为 `img_NN`，drafts.json 中历史草稿的旧中文 cid 与正文引用不受影响（渲染与附件始终同批生成、同源一致）；
+  - 与 PR #14（图片 MIME 魔数识别，含 ICC-JPEG 修复）为姊妹修复：本分支 sender 仍为 develop 版本，端到端测试已用 JFIF 头图片规避；两 PR 合并时 CHANGELOG 的 `## 2026-08-08` 头可能冲突，按「最新在上、保留双方条目」rebase 解决。
+- **下一步建议**：合并 PR #14 与本 PR 后进入 TASK-G.4（Web UI 预研，届时一并评估已留档的方案 3 Pillow 图片管线）。
 
 ## 2026-08-07
 

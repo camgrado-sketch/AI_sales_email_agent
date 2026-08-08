@@ -427,6 +427,19 @@ def _template_structure_schema():
                 "type": "string",
                 "description": "Email subject line with {{VAR}} placeholders",
             },
+            "subject_template_cn": {
+                "type": "string",
+                "description": (
+                    "Chinese subject line with {{VAR}} placeholders"
+                ),
+            },
+            "subject_template_en": {
+                "type": "string",
+                "description": (
+                    "English subject line with {{VAR}} placeholders; "
+                    "MUST NOT contain any Chinese characters"
+                ),
+            },
             "cn_html": {
                 "type": "string",
                 "description": "Complete Chinese HTML email body with {{VAR}}, {{IMAGE:name}}, {{FILE:name}} placeholders",
@@ -567,8 +580,16 @@ def _default_config_yaml(template_name, structured, source_lang=None):
         "customer_type: all",
         "recommended_stage: new_lead",
         f"subject_template: {subject_template!r}",
-        "variables:",
     ])
+    if structured.get("subject_template_cn"):
+        lines.append(
+            f"subject_template_cn: {structured['subject_template_cn']!r}"
+        )
+    if structured.get("subject_template_en"):
+        lines.append(
+            f"subject_template_en: {structured['subject_template_en']!r}"
+        )
+    lines.append("variables:")
     for v in variables:
         lines.append(f"  - {v}")
     lines.append("images:")
@@ -864,10 +885,22 @@ def activate_template(template_name, candidate_path, source_template_path=None, 
         print(f"⚠️ 警告：模板导入返回的 subject_template 为空，已自动生成主题：{fallback}")
         structured["subject_template"] = fallback
 
-    # Guard: English template subject should not contain Chinese characters.
-    final_subject = structured.get("subject_template", "").strip()
-    if source_lang == "en" and re.search(r"[一-鿿]", final_subject):
-        print("⚠️ 警告：英文模板主题中检测到汉字，请检查语言纯净度。")
+    # Bilingual subjects: backfill missing variants from the legacy single
+    # field so render-time can pick the variant matching the email language.
+    subject_template = structured.get("subject_template", "").strip()
+    for lang in ("cn", "en"):
+        key = f"subject_template_{lang}"
+        if not str(structured.get(key, "")).strip():
+            structured[key] = subject_template if source_lang == lang else ""
+
+    # Guard: English subject must stay language-pure. Drop an offending variant
+    # so the render-side fallback chain produces a clean English subject.
+    if re.search(r"[一-鿿]", str(structured.get("subject_template_en", ""))):
+        print(
+            "⚠️ 警告：英文主题包含汉字，已丢弃该变体，"
+            "发送时将回退为纯英文标题。"
+        )
+        structured["subject_template_en"] = ""
 
     written = write_structured_template(template_name, structured, source_lang)
 

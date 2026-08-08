@@ -538,6 +538,11 @@ def _import_template_flow():
         ).strip()
         if new_subject:
             cfg["subject_template"] = new_subject
+            # Keep the source-language variant in sync so the render-side
+            # language-aware subject selection sees the user's edit.
+            src_lang = str(cfg.get("source_language", "")).strip()
+            if src_lang in ("cn", "en"):
+                cfg[f"subject_template_{src_lang}"] = new_subject
             with open(result["config_path"], "w", encoding="utf-8") as f:
                 yaml.safe_dump(cfg, f, allow_unicode=True)
             print(f"✅ 主题已更新为：{new_subject}")
