@@ -96,7 +96,43 @@ def _normalize_variables(variables):
     return normalized
 
 
-def render(template_name, variables, language=None):
+# Preview-time placeholder chrome (dashed boxes with label text) must not leak
+# into outbound emails; reduce them to the bare placeholder token first.
+_IMAGE_CHROME_RE = re.compile(
+    r"<div[^>]*(?:class=\"[^\"]*placeholder[^\"]*\""
+    r"|style=\"[^\"]*dashed[^\"]*\")[^>]*>"
+    r"(?:(?!</div>).)*?\{\{IMAGE:[^}]+\}\}(?:(?!</div>).)*?</div>",
+    re.DOTALL,
+)
+
+_ASCII_CID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+
+
+def _strip_image_placeholder_chrome(html):
+    """Replace dashed placeholder boxes with the bare {{IMAGE:...}} token."""
+    def unwrap(match):
+        return re.search(r"\{\{IMAGE:[^}]+\}\}", match.group(0)).group(0)
+
+    return _IMAGE_CHROME_RE.sub(unwrap, html)
+
+
+def _make_cid(image_name, used_cids):
+    """Return an RFC 2392-safe ASCII Content-ID for the given image name.
+
+    Non-ASCII cids (e.g. Chinese template names) break Content-ID matching in
+    mail clients, so they are replaced with a sequential ASCII token.
+    """
+    if image_name.isascii() and _ASCII_CID_RE.match(image_name):
+        cid = image_name
+    else:
+        cid = f"img_{len(used_cids) + 1:02d}"
+        while cid in used_cids:
+            cid += "x"
+    used_cids.add(cid)
+    return cid
+
+
+def render(template_name, variables, language=None, missing_vars=None):
     """
     Render an HTML email template.
 
@@ -104,26 +140,36 @@ def render(template_name, variables, language=None):
         template_name: Name of the template directory under templates/email.
         variables: Dict of placeholder values. Keys are normalized to uppercase.
         language: Optional language code to select template_<lang>.html.
+        missing_vars: Optional list to collect names of unresolved simple variables.
 
     Returns:
         Tuple of (html_body, images, files) where images/files are lists of dicts
         with metadata for inline attachments or download links.
     """
     html = _load_template_html(template_name, language)
+    html = _strip_image_placeholder_chrome(html)
     variables = _normalize_variables(variables)
     images = []
     files = []
+    cid_by_name = {}
+    used_cids = set()
 
     # Replace image placeholders: {{IMAGE:name}}
     def replace_image(match):
         image_name = match.group(1).strip()
+        cid = cid_by_name.get(image_name)
+        if cid is None:
+            cid = _make_cid(image_name, used_cids)
+            cid_by_name[image_name] = cid
         image_path = _find_image_file(image_name)
         if image_path:
-            images.append({"cid": image_name, "path": image_path})
-            return f'<img src="cid:{image_name}" alt="{image_name}" style="width:100%;height:auto;display:block;">'
-        else:
-            # Missing asset: leave a comment and warn
-            return f"<!-- Missing image asset: {image_name} -->"
+            images.append({"cid": cid, "path": image_path})
+            return (
+                f'<img src="cid:{cid}" alt="{image_name}" '
+                'style="width:100%;height:auto;display:block;">'
+            )
+        # Missing asset: leave a comment and warn
+        return f"<!-- Missing image asset: {image_name} -->"
 
     html = re.sub(r"\{\{IMAGE:([^}]+)\}\}", replace_image, html)
 
@@ -152,30 +198,11 @@ def render(template_name, variables, language=None):
         var_name = match.group(1).strip().upper()
         if var_name in variables:
             return str(variables[var_name])
-        return match.group(0)
+        if missing_vars is not None:
+            missing_vars.append(var_name)
+        # Do not leak raw placeholders into outbound emails.
+        return ""
 
     html = re.sub(r"\{\{([^{}:]+)\}\}", replace_var, html)
 
     return html, images, files
-
-
-def template_for_stage(stage):
-    """
-    Pick a default template name for a given sales stage.
-
-    Falls back to the 'other' template when the stage-specific template
-    does not exist, so that a generic template can still be used.
-    """
-    mapping = {
-        "new_lead": "initial_contact",
-        "contacted_no_reply": "follow_up",
-        "follow_up_no_reply": "final_note",
-        "replied": "follow_up",
-    }
-    name = mapping.get(stage, "initial_contact")
-    existing = list_templates()
-    if name in existing:
-        return name
-    if "other" in existing:
-        return "other"
-    return name

@@ -16,7 +16,8 @@ def _current_date(language="cn"):
     now = datetime.now()
     if language == "cn":
         return now.strftime("%Y年%m月%d日")
-    return now.strftime("%B %d, %Y")
+    # English date without leading zero: "August 6, 2026"
+    return f"{now.strftime('%B')} {now.day}, {now.year}"
 
 
 def _build_variables(customer, template_config, language="cn"):
@@ -72,9 +73,10 @@ def _build_variables(customer, template_config, language="cn"):
         "INDUSTRY": "CUSTOMER_INDUSTRY",
         "SENDER_COMPANY_NAME": "SENDER_COMPANY",
         "MARKET_REGION": "SENDER_MARKET_REGION",
+        "DATE": "CURRENT_DATE",
     }
     for alias, canonical in aliases.items():
-        if alias not in variables and canonical in variables:
+        if canonical in variables:
             variables[alias] = variables[canonical]
 
     return variables
@@ -108,7 +110,7 @@ def _is_skipped_customer(customer):
     return name.startswith("#")
 
 
-def generate_for_customer(customer, language=None):
+def generate_for_customer(customer, language=None, missing_vars=None):
     """Generate a single draft for a customer using local template variable replacement."""
     if not config.is_template_confirmed():
         raise RuntimeError("No template confirmed. Please import and confirm a template first (menu 6).")
@@ -116,34 +118,38 @@ def generate_for_customer(customer, language=None):
     customer_id = customer.get("id") or customer.get("customer_id")
     analysis = interaction_analyzer.analyze(customer)
 
-    # User-selected template overrides automatic stage-based selection
     selected = config.get_selected_template()
     available_templates = template_engine.list_templates()
-    if selected and selected in available_templates:
-        template_name = selected
-    else:
-        template_name = analysis["template_type"]
+    if not selected:
+        raise RuntimeError(
+            "未选择生效模板。请先到菜单 6 [A] 选择要使用的模板。"
+        )
+    if selected not in available_templates:
+        raise RuntimeError(
+            f"生效模板 '{selected}' 不存在或已被删除。请先到菜单 6 [A] 重新选择。"
+        )
+    template_name = selected
 
     chosen_language = language or analysis.get("language", "cn")
-    if template_name not in available_templates:
-        if available_templates:
-            fallback = available_templates[0]
-            print(f"⚠️ 推荐模板 '{template_name}' 未激活，回退使用 '{fallback}'")
-            template_name = fallback
-        else:
-            raise RuntimeError("没有可用的激活模板，请先到菜单 6 导入/确认模板。")
 
     template_config = template_engine.get_template_config(template_name)
     variables = _build_variables(customer, template_config, language=chosen_language)
 
+    local_missing = []
     html_body, images, files = template_engine.render(
-        template_name, variables, language=chosen_language
+        template_name, variables, language=chosen_language, missing_vars=local_missing
     )
 
     # Build subject from template config if it contains a declared subject_template,
     # otherwise use the template's subject_template. The template importer writes a
     # subject line into config.yaml as the first rule for reference; we render it here.
-    subject = _render_subject(template_config, variables)
+    subject = _render_subject(
+        template_config, variables, missing_vars=local_missing,
+        language=chosen_language,
+    )
+
+    if missing_vars is not None:
+        missing_vars.extend(local_missing)
 
     draft_id = data_store.generate_draft_id(customer_id)
     draft = {
@@ -168,22 +174,68 @@ def generate_for_customer(customer, language=None):
     return draft
 
 
-def _render_subject(template_config, variables):
-    """Render the subject line template with variables.
+_CJK_RE = re.compile("[一-鿿]")
 
-    If config.yaml contains a 'subject_template' key, use it; otherwise fall back
-    to a generic subject so drafts are never sent with an empty subject.
-    """
-    subject_template = template_config.get("subject_template", "").strip()
-    if not subject_template:
-        company = variables.get("CUSTOMER_COMPANY", "")
-        return f"Furniture partnership opportunity for {company} | GRADO Contract" if company else "GRADO Contract Partnership Opportunity"
 
+def _generic_subject(variables, language):
+    """Language-pure fallback subject when no usable template subject exists."""
+    company = str(variables.get("CUSTOMER_COMPANY", "")).strip()
+    if language == "en":
+        if company and not _CJK_RE.search(company):
+            return f"Furniture partnership opportunity for {company} | GRADO Contract"
+        return "GRADO Contract Partnership Opportunity"
+    if company:
+        return f"{company} 公共空间家具合作机会 | GRADO Contract"
+    return "GRADO Contract 公共空间家具合作机会"
+
+
+def _substitute_subject(subject_template, variables, missing_vars):
     def replace_var(match):
         var_name = match.group(1).strip().upper()
-        return str(variables.get(var_name, match.group(0)))
+        if var_name in variables:
+            return str(variables[var_name])
+        if missing_vars is not None:
+            missing_vars.append(var_name)
+        return ""
 
     return re.sub(r"\{\{([^{}:]+)\}\}", replace_var, subject_template)
+
+
+def _strip_dangling_connectives(subject):
+    """Clean artifacts left after dropping CJK values (e.g. 'for |', '| ')."""
+    subject = re.sub(r"\b(for|to|with|of|at)\s*(?=[|–—-]|$)", "", subject)
+    subject = re.sub(r"\s*([|–—-])\s*", r" \1 ", subject)
+    subject = re.sub(r"\s{2,}", " ", subject)
+    return subject.strip().strip("|–—-").strip()
+
+
+def _render_subject(template_config, variables, missing_vars=None, language="cn"):
+    """Render the subject line template with variables for the target language.
+
+    Prefers the language-specific variant written by the importer
+    (subject_template_cn / subject_template_en), falling back to the legacy
+    single subject_template and finally to a generic language-pure subject.
+    For English, CJK-bearing variable values are excluded and dangling
+    connectives cleaned so outbound subjects never mix Chinese into English.
+    """
+    subject_template = str(
+        template_config.get(f"subject_template_{language}", "")
+        or template_config.get("subject_template", "")
+    ).strip()
+    if not subject_template:
+        return _generic_subject(variables, language)
+
+    rendered = _substitute_subject(subject_template, variables, missing_vars)
+    if language == "en" and _CJK_RE.search(rendered):
+        ascii_vars = {
+            k: v for k, v in variables.items() if not _CJK_RE.search(str(v))
+        }
+        rendered = _strip_dangling_connectives(
+            _substitute_subject(subject_template, ascii_vars, None)
+        )
+        if not rendered or _CJK_RE.search(rendered):
+            return _generic_subject(variables, "en")
+    return rendered
 
 
 def generate_all(customers=None):
@@ -204,6 +256,7 @@ def generate_all(customers=None):
         print(f"⏳ Resuming generation. {len(processed_ids)} customer(s) already processed.")
 
     new_count = 0
+    all_missing = set()
     try:
         for customer in customers:
             customer_id = customer.get("id") or customer.get("customer_id")
@@ -220,7 +273,9 @@ def generate_all(customers=None):
 
             print(f"Generating draft for {customer.get('name')} at {customer.get('company')}...")
             try:
-                generate_for_customer(customer)
+                local_missing = []
+                generate_for_customer(customer, missing_vars=local_missing)
+                all_missing.update(local_missing)
                 processed_ids.add(customer_id)
                 data_store.save_generation_state(processed_ids)
                 new_count += 1
@@ -228,6 +283,12 @@ def generate_all(customers=None):
                 print(f"❌ Failed to generate draft for {customer_id}: {e}")
     except KeyboardInterrupt:
         print("\n⏸️  Generation paused by user.")
+
+    if all_missing:
+        print(
+            f"\033[93m⚠️  以下变量未能匹配，已替换为空字符串："
+            f"{', '.join(sorted(all_missing))}\033[0m"
+        )
 
     total_customers = len([c for c in customers if (c.get("id") or c.get("customer_id"))])
     all_drafts = data_store.load_drafts()

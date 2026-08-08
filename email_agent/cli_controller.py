@@ -2,10 +2,16 @@ import os
 import re
 import sys
 
+import yaml
+
 from email_agent import config, data_store, sender_profile_editor, status, template_engine, template_importer
 
 
 def _clear_screen():
+    # 仅在真实交互终端清屏；非 tty 环境（测试、管道、重定向）直接跳过，
+    # 避免向输出流写入清屏转义序列或 "TERM environment variable not set." 噪音。
+    if not sys.stdout.isatty():
+        return
     os.system("cls" if os.name == "nt" else "clear")
 
 
@@ -36,7 +42,6 @@ def _print_settings_menu():
     print("  [2] 切换当前模型")
     print("  [3] 切换 skill 模式")
     print("  [4] 配置检查")
-    print("  [5] 选择生效模板")
     print("  [0] 返回主菜单")
     print()
 
@@ -73,6 +78,7 @@ def _require_confirmed_template():
 
 
 def menu_generate():
+    _clear_screen()
     print("\n[生成草稿]")
     if not _require_confirmed_template():
         return
@@ -94,6 +100,7 @@ def menu_generate():
 
 
 def menu_review():
+    _clear_screen()
     print("\n[审核草稿]")
     drafts = data_store.load_drafts(status="pending")
     if not drafts:
@@ -157,6 +164,7 @@ def menu_review():
 
 
 def menu_send():
+    _clear_screen()
     print("\n[发送已审核邮件]")
     if not _require_confirmed_template():
         return
@@ -165,6 +173,7 @@ def menu_send():
 
 
 def menu_check_replies():
+    _clear_screen()
     print("\n[检查回复]")
     from email_agent.receiver import check_replies
     from email_agent.preview import open_replies_preview
@@ -184,6 +193,7 @@ def menu_check_replies():
             ).strip().lower()
             if choice in ("s", "save"):
                 check_replies(dry_run=False)
+                data_store.mark_all_replies_viewed()
                 print("✅ 回复已保存到 reply_logs.csv。")
                 break
             elif choice in ("r", "refresh"):
@@ -205,6 +215,7 @@ def menu_check_replies():
 
 
 def menu_logs():
+    _clear_screen()
     print("\n[查看日志]")
     email_logs = data_store.load_email_logs()
     reply_logs = data_store.load_reply_logs()
@@ -219,6 +230,7 @@ def menu_logs():
 
 
 def menu_config():
+    _clear_screen()
     print("\n[配置检查]")
     active = config.get_active_model()
     sender = config.load_sender_profile()
@@ -236,7 +248,7 @@ def menu_config():
     print(f"Skill 模式：      {config.SKILL_MODE}")
     print(f"模板已确认：      {config.is_template_confirmed()}")
     selected = config.get_selected_template()
-    print(f"生效模板：        {selected if selected else '（按阶段自动选择）'}")
+    print(f"生效模板：        {selected if selected else '（未选择）'}")
     print(f"Demo 模式：       {config.DEMO_MODE}")
     print(f"允许邮箱：        {config.ALLOWED_TEST_EMAILS}")
     print(f"日发送上限：      {config.MAX_DAILY_SENDS}")
@@ -248,6 +260,7 @@ def menu_config():
 
 
 def menu_switch_model():
+    _clear_screen()
     print("\n[切换当前模型]")
     models = config.load_available_models()
     if not models:
@@ -282,6 +295,7 @@ def menu_switch_model():
 
 
 def menu_toggle_skill():
+    _clear_screen()
     print("\n[切换 skill 模式]")
     print(f"当前模式：{config.SKILL_MODE}")
     print("  full    - 使用完整版 email_writing_skill.md（仅模板导入参考）")
@@ -305,6 +319,7 @@ def menu_toggle_skill():
 
 def menu_select_template():
     """Let the user pick which active template should be used for generation."""
+    _clear_screen()
     print("\n[选择生效模板]")
     templates = template_engine.list_templates()
     if not templates:
@@ -313,14 +328,16 @@ def menu_select_template():
 
     current = config.get_selected_template()
     print("可用模板：")
-    print("  [0] 按销售阶段自动选择")
     for i, name in enumerate(templates, start=1):
         marker = " *" if name == current else "  "
-        print(f"{marker}[{i}] {name}")
+        imported_at = config.get_template_imported_at(name)
+        date_part = f" ({imported_at})" if imported_at else ""
+        status = _template_usage_state(name)
+        print(f"{marker}[{i}] {name}{date_part} [{status}]")
 
     choice = _prompt_with_hint(
-        f"请选择模板（0-{len(templates)}）或按 Enter 保持当前：",
-        "0 恢复自动规则，其他编号强制使用该模板"
+        f"请选择模板（1-{len(templates)}）或按 Enter 保持当前：",
+        "其他编号不会变更选择"
     ).strip()
     if not choice:
         print("无变化。")
@@ -331,30 +348,38 @@ def menu_select_template():
         print("无效输入。")
         return
 
-    settings = data_store.load_settings()
-    if idx == 0:
-        settings["selected_template"] = ""
-        data_store.save_settings(settings)
-        print("✅ 已恢复按销售阶段自动选择模板。")
-    elif 1 <= idx <= len(templates):
+    if 1 <= idx <= len(templates):
         selected = templates[idx - 1]
-        settings["selected_template"] = selected
-        data_store.save_settings(settings)
-        print(f"✅ 已选择生效模板：'{selected}'。生成草稿时将优先使用该模板。")
+        config.set_selected_template(selected)
+        print(f"✅ 已设为当前生效模板：'{selected}'。生成草稿时将使用该模板。")
     else:
         print("无效编号。")
 
 
+def _template_usage_state(template_name):
+    """Return a short usage state label for a template."""
+    approved = [d for d in data_store.load_drafts(status="approved") if d.get("template") == template_name]
+    if not approved:
+        return "未发送"
+    sent_ids = data_store.get_sent_draft_ids()
+    remaining = [d for d in approved if d.get("draft_id") not in sent_ids]
+    if not remaining:
+        return "已全部发送"
+    return f"部分发送（剩余 {len(remaining)} 封）"
+
+
 def menu_sender_profile():
+    _clear_screen()
     sender_profile_editor.edit_sender_profile_interactive()
 
 
 def menu_settings():
     while True:
+        _clear_screen()
         _print_settings_menu()
         choice = _prompt_with_hint(
             "请选择设置项：",
-            "[1]发送者信息 [2]切换模型 [3]切换skill [4]配置检查 [5]选择生效模板 [0]返回"
+            "[1]发送者信息 [2]切换模型 [3]切换skill [4]配置检查 [0]返回"
         ).strip()
 
         if choice == "1":
@@ -369,9 +394,6 @@ def menu_settings():
         elif choice == "4":
             menu_config()
             _wait_for_enter()
-        elif choice == "5":
-            menu_select_template()
-            _wait_for_enter()
         elif choice == "0":
             print("返回主菜单。")
             break
@@ -382,6 +404,7 @@ def menu_settings():
 
 def menu_manage_archives():
     """List and delete archived templates organized by template_name/YYYY/MM/DD."""
+    _clear_screen()
     print("\n[管理模板归档]")
     archives = template_importer.list_archive_folders()
     if not archives:
@@ -490,15 +513,41 @@ def _import_template_flow():
         result = template_importer.activate_template(
             template_name, candidate.path, force=True
         )
-        print(f"✅ 已导入为 '{result['template_name']}' ({result['source_language']})，已生成 {result['target_language']} 版本。")
+        print(f"✅ 已导入为 '{result['template_name']}' ({result['source_language']})。")
         print(f"   主模板：{result['main_path']}")
-        print(f"   双语模板：{result['other_path']}")
+        if result.get("other_path"):
+            print(f"   双语模板（{result['target_language']}）：{result['other_path']}")
+        else:
+            print(f"   双语模板（{result['target_language']}）：未生成（LLM 输出缺少该语言内容，见上方警告）")
         if result.get("archive_path"):
             print(f"   旧模板已归档至：{result['archive_path']}")
         template_importer.save_import_state()
     except Exception as e:
         print(f"❌ 导入失败：{e}")
         return
+
+    # Allow the user to review/edit the generated subject line before confirmation.
+    try:
+        with open(result["config_path"], "r", encoding="utf-8") as f:
+            cfg = yaml.safe_load(f)
+        current_subject = cfg.get("subject_template", "")
+        print(f"\n\033[1m\033[96m当前邮件主题：{current_subject}\033[0m")
+        new_subject = _prompt_with_hint(
+            "[Enter] 接受 / 输入新主题：",
+            "可直接回车保留当前主题，或输入新的邮件主题"
+        ).strip()
+        if new_subject:
+            cfg["subject_template"] = new_subject
+            # Keep the source-language variant in sync so the render-side
+            # language-aware subject selection sees the user's edit.
+            src_lang = str(cfg.get("source_language", "")).strip()
+            if src_lang in ("cn", "en"):
+                cfg[f"subject_template_{src_lang}"] = new_subject
+            with open(result["config_path"], "w", encoding="utf-8") as f:
+                yaml.safe_dump(cfg, f, allow_unicode=True)
+            print(f"✅ 主题已更新为：{new_subject}")
+    except Exception as e:
+        print(f"⚠️ 无法读取/更新主题：{e}")
 
     # Preview and confirm immediately after import
     _confirm_template_flow()
@@ -560,11 +609,14 @@ def _confirm_template_flow():
                 print("无效输入。")
                 return
 
-    # Preview each selected template
+    # Preview each selected template (one preview window per available language)
     for name in selected_templates:
         try:
-            preview_path = open_template_preview(name)
-            print(f"🌐 已打开模板 '{name}' 的预览：{preview_path}")
+            preview_paths = open_template_preview(name)
+            if preview_paths:
+                print(f"🌐 已打开模板 '{name}' 的预览（{len(preview_paths)} 个语言版本）。")
+            else:
+                print(f"⚠️ 模板 '{name}' 未能打开预览：没有可用的模板文件。")
         except Exception as e:
             print(f"⚠️ 无法打开模板 '{name}' 的预览：{e}")
 
@@ -580,14 +632,12 @@ def _confirm_template_flow():
             print(f"✅ 模板 '{name}' 已确认。")
 
             set_active = _prompt_with_hint(
-                f"是否将 '{name}' 设为强制生效模板（覆盖自动阶段规则）？ (y/N): ",
-                "[y] 设为生效模板  [Enter/N] 仍按阶段自动选择"
+                f"是否将 '{name}' 设为当前生效模板？ (y/N): ",
+                "[y] 设为当前生效模板  [Enter/N] 仅确认，稍后手动选择"
             ).strip().lower()
             if set_active == "y":
-                settings = data_store.load_settings()
-                settings["selected_template"] = name
-                data_store.save_settings(settings)
-                print(f"✅ '{name}' 已设为生效模板。")
+                config.set_selected_template(name)
+                print(f"✅ '{name}' 已设为当前生效模板。")
         else:
             print("模板保持未确认。生成和发送已被阻断。")
         return
@@ -605,6 +655,7 @@ def _confirm_template_flow():
 
 
 def menu_import_template():
+    _clear_screen()
     print("\n[导入 / 确认模板]")
 
     # Detect stale import state when active templates are gone
@@ -622,6 +673,7 @@ def menu_import_template():
             return
 
     while True:
+        _clear_screen()
         templates = template_engine.list_templates()
         print("\n当前激活模板：")
         if templates:
@@ -644,11 +696,13 @@ def menu_import_template():
 
         choice = _prompt_with_hint(
             "请选择：",
-            "[I] 导入新文件  [M] 管理归档  [R] 重置导入状态  [C] 确认/重置  [Q] 返回"
+            "[I] 导入新文件  [A] 选择生效模板  [C] 确认/重置  [M] 管理归档  [R] 重置导入状态  [Q] 返回"
         ).strip().lower()
 
         if choice in ("i", "import"):
             _import_template_flow()
+        elif choice in ("a", "activate"):
+            menu_select_template()
         elif choice in ("m", "manage"):
             menu_manage_archives()
         elif choice in ("r", "reset"):
@@ -664,6 +718,7 @@ def menu_import_template():
 
 
 def menu_delete_drafts():
+    _clear_screen()
     print("\n[删除草稿]")
     drafts = data_store.load_drafts()
     if not drafts:

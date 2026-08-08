@@ -18,6 +18,7 @@
    - 图片位置使用 `{{IMAGE:图片名称}}`，例如 `{{IMAGE:hero}}`、`{{IMAGE:portfolio_grid_1}}`；
    - 文件/附件下载链接位置使用 `{{FILE:文件名称}}`，例如 `{{FILE:catalog_pdf}}`；
    - 已有明确 URL 的链接保留为 `<a href="...">`。
+   - **占位符位置锁定（强制）**：原文中出现的每一个 `{{IMAGE:...}}` / `{{FILE:...}}` 占位符都必须在输出中原样保留，**数量不得增减、相对位置不得移动**（原文在前的仍在前、在后的仍在后），禁止合并、拆分或改名；`cn_html`、`en_html` 与 JSON 中的 `images`/`files` 列表三者必须逐一对应、完全一致。返回前自检：逐个核对输入中的占位符是否全部出现在两个语言版本中。
 
 4. **输出双语版本**：
    - `cn_html`：中文版本完整 HTML（含占位符）；
@@ -29,6 +30,8 @@
 ```json
 {
   "subject_template": "... {{CUSTOMER_FIRST_NAME}} ...",
+  "subject_template_cn": "... {{CUSTOMER_FIRST_NAME}} ...",
+  "subject_template_en": "... {{CUSTOMER_FIRST_NAME}} ...",
   "cn_html": "<!DOCTYPE html><html>...",
   "en_html": "<!DOCTYPE html><html>...",
   "variables": ["SENDER_NAME", "CUSTOMER_FIRST_NAME", "CURRENT_DATE"],
@@ -38,17 +41,25 @@
 }
 ```
 
+6. **邮件主题生成规则**：
+   - 必须同时输出 `subject_template_cn` 与 `subject_template_en` 两个语言版本（`subject_template` 保留为源语言版本，三者中源语言两个字段内容一致），各自遵守下方语言纯净规则：`subject_template_en` 零汉字，`subject_template_cn` 品牌名二选一、不并排。
+   - `subject_template` 禁止为空。若原始模板有明确标题，提取并转化为含变量的模板；若无标题，根据正文核心内容自动生成。
+   - 可选择性引入以下变量，使标题与客户自然关联，**不强制全部使用**：
+     - `{{CUSTOMER_COMPANY}}`：客户公司名
+     - `{{CUSTOMER_FIRST_NAME}}`：客户名字
+     - `{{CUSTOMER_INDUSTRY}}`：客户所在行业
+     - `{{SENDER_MARKET_REGION}}`：发件人负责区域
+   - 变量必须自然融入标题语义，**禁止生硬拼接**（如 `"GRADO Contract + {{CUSTOMER_COMPANY}}"`、`"主题：{{CUSTOMER_COMPANY}}"` 这类格式不允许）。
+   - 标题应简洁：英文版通常不超过 10 个词，中文版通常不超过 20 个字。
+   - 标题语言与对应语言版本的正文保持一致，遵守 §语言纯净规则：英文主题零汉字，中文主题品牌名二选一、不并排。
+   - 返回前自检：若 `subject_template` 为空，必须重新生成。
+
 ## HTML 输出规范
 
 - 输出完整、独立的 HTML 文档（含 `<!DOCTYPE html>`、`<html>`、`<head>`、`<body>`）；
 - 在 `<head>` 中使用简洁的内联 CSS，确保邮件在常见客户端下可读；
 - 正文最大宽度建议 `680px`，居中对齐；
-- 图片占位符位置渲染为一个带边框和提示文字的 `<div>`，例如：
-  ```html
-  <div style="border:1px dashed #ccc;padding:12px;text-align:center;">
-    [图片占位符: {{IMAGE:hero}}]
-  </div>
-  ```
+- 图片占位符在 HTML 中**原样保留** `{{IMAGE:名称}}`（单独成段即可），发送时由本地脚本自动替换为真实内联图片；**禁止**为其包裹虚线框、边框或"图片占位符/Image placeholder"等说明文字——装饰性包裹会在最终发出的邮件中残留为空框与破图。
 - 文件占位符位置渲染为带提示的下载链接：
   ```html
   <a href="{{FILE:catalog_pdf}}">[文件占位符: catalog_pdf]</a>
@@ -78,9 +89,17 @@
 - 如果原始内容主要是英文，`en_html` 应忠实于原文，`cn_html` 为中文翻译版；
 - 两个版本的占位符必须完全一致。
 
+## 语言纯净规则
+
+- `en_html` 必须全为英文，**不允许出现任何汉字**，包括品牌名在内。英文版品牌名统一使用 `GRADO Contract`。
+- `cn_html` 使用中文；品牌名可使用英文名 `GRADO Contract` 或中文名 `格度商业家具`，但两者不得在同一处并排出现（例如禁止 "GRADO Contract 格度商业家具"）。
+- `subject_template` 同样遵守对应语言版本的规则：英文主题零汉字，中文主题品牌名二选一、不并排。
+- 变量填充后的内容（如客户姓名、公司名）保持原始格式，不做强制转换。
+
 ## 禁止事项
 
 - 禁止杜撰客户或发送者信息；
 - 禁止在 variables 列表外的地方编造具体人名、公司名；
 - 禁止把图片、文件二进制内容写入输出；
-- 禁止保留无关的页眉、页脚、批注。
+- 禁止保留无关的页眉、页脚、批注；
+- 禁止增加、删除、移动、合并、拆分或重命名图片占位符（`{{IMAGE:...}}`）与文件占位符（`{{FILE:...}}`）：占位符必须与原文中的位置严格一一对应，遗漏任何一个都会导致邮件图片/附件丢失。

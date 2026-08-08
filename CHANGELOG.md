@@ -1,5 +1,209 @@
 # CHANGELOG
 
+## 2026-08-08
+
+### 修复：CI 环境 EMAIL_ACCOUNT 未配置时邮件构建 TypeError（sender.py None 防护）
+
+- **修改文件**：`email_agent/sender.py`、`tests/test_sender_image_mime.py`
+- **问题定位**：发布 PR #22（develop→main）CI 运行失败，`4 failed, 116 passed`。根因：CI 无 `.env`，`config.EMAIL_ACCOUNT = os.getenv("EMAIL_ACCOUNT")` 为 `None`，`sender.py` 中 `"@" in config.EMAIL_ACCOUNT` 抛 `TypeError: argument of type 'NoneType' is not iterable`。本地因 `.env` 已配置而全部通过（120 passed），属环境差异型缺陷，由 CI 门禁首次暴露。
+- **核心逻辑**：`create_email_message` 取 `account = config.EMAIL_ACCOUNT or ""` 后再派生 Message-ID 域名（沿用 `config.py:37` 同款 `or ""` 防护惯例），未配置时域名回退 `local`，构建不再崩溃。
+- **验证**：新增回归测试（monkeypatch `EMAIL_ACCOUNT=None`）先红后绿；全量 121 passed；flake8 硬门禁 0 命中；py_compile 通过。
+- **潜在风险**：无业务行为变化——真实发送链路 `.env` 必然配置 `EMAIL_ACCOUNT`；仅消除未配置环境下的构建崩溃。
+- **下一步建议**：合并后 #22 的 CI 自动重跑，预期通过；随后打 tag v1.0.0 + R5 验证。
+
+### 修复：CI 裸 pytest 调用 ModuleNotFoundError（pytest.ini 增加 pythonpath）
+
+- **修改文件**：`pytest.ini`
+- **问题定位**：PR #17（develop→main）首次 CI 运行（Python 3.11.15 / pytest 9.1.1）在 `Test with pytest` 步骤失败：`ImportError while loading conftest` → `ModuleNotFoundError: No module named 'email_agent'`（flake8 步骤通过）。根因：CI 使用裸 `pytest` 调用，该方式不会把仓库根目录加入 `sys.path`，`tests/conftest.py` 的 `from email_agent import config` 必然失败；本地惯用 `python3 -m pytest`（cwd 入 `sys.path`）掩盖了差异。已用裸 `pytest` 在本地复现同一错误。
+- **核心逻辑**：`pytest.ini` 增加 `pythonpath = .`（pytest≥7 内建 ini 选项；requirements 钉 `pytest>=8.0.0`，兼容），两种调用方式均可用；业务代码与测试代码零改动。
+- **验证**：裸 `pytest`（与 CI 同款调用）本地 120/120 全绿；`python3 -m pytest` 120/120 全绿；flake8 硬门禁（E9,F63,F7,F82）零命中。
+- **潜在风险**：无（纯 ini 配置增量，无行为变化）。
+- **下一步建议**：本 PR 合入后 PR #17 的 CI 自动重跑；绿后按 #18 → 本 PR → #17 顺序合并（不使用 stack 合并）；review approval 阻塞需人工处理（非作者账号批准或调整分支保护）。
+
+### TASK-G.4：本地 Web UI 可行性预研（架构评估，不含代码）
+
+- **修改文件**：`docs/architecture.md`（新增第 11 节）
+- **核心逻辑**：
+  - 评估纯 CLI 升级为本地 Web UI（FastAPI + 网页编辑器）的可行性：现有三层分层（交互层 → 业务模块 → `data_store`）使 Web 化仅为"替换交互层"，核心原则（LLM 调用点唯一化、模板用户主权、白名单/日上限/确认门禁）自然继承；
+  - 方案对比：A（FastAPI + 原生前端，推荐）/ B（继续增强 CLI）/ C（SPA 框架，弃）；预览场景浏览器原生渲染 HTML，可**移除 Playwright 依赖**；模板编辑器定位为"HTML 源码编辑 + 实时预览"，不做 WYSIWYG；
+  - 成本：新增纯 Python 依赖（fastapi/uvicorn），15-20 个 API 端点 + 5-8 个页面，demo 规模约 1.5-2 人周；
+  - 风险：`data_store` 无并发锁（高，立项前须专项加固并以测试固化）、双入口行为漂移、安全边界（仅绑 `127.0.0.1`）、范围蔓延；
+  - 留档方案 3（Pillow 图片管线）评估：识别需求已由 PR #14 魔数探测闭环，v1.0 不引入；其增量价值（CMYK/SVG/HEIC 转码、体积归一、上传校验）与 Web UI 立项一并评估；
+  - 结论：技术可行、架构友好，建议 v1.0 发布后立项，第一期收敛为状态看板 + 草稿审核 + 本地渲染预览。
+- **验证**：纯文档变更；develop pytest 120/120 基线不受影响。
+- **潜在风险**：无（纯文档变更）。
+- **下一步建议**：合并本 PR；发布波次进入收尾——R4 终验已在 develop 预演通过（120 passed、硬门禁 0、py_compile 通过、ICC-JPEG 冒烟通过），PR #17（develop→main，v1.0）待人工审查合并，合并后执行 R5 验证并打标签 `v1.0.0`。
+
+### 修复：恢复 PR #14 合并冲突解决时丢失的 CHANGELOG 条目
+
+- **修改文件**：`CHANGELOG.md`
+- **核心逻辑**：PR #15 合并解决与 PR #14 的 `## 2026-08-08` 头冲突时，PR #14 完整条目丢失；本 PR 自 `origin/fix/issue-image-mime:CHANGELOG.md` 逐字恢复，保持"最新在上"顺序（#15 条目在上、#14 条目在下）。
+- **验证**（合并后 develop 全量验证，TASK-R4 预演）：pytest 120/120（基线 90 + G.3 新增 8 + MIME 新增 14 + 双语标题/图片新增 8）；flake8 硬门禁（E9,F63,F7,F82）零命中；`py_compile` 全量通过；用真实 ICC-JPEG 素材 `信01_img_01.jpg`（`ffd8ffe2` APP2 头，即原崩溃触发字节）端到端构建邮件冒烟：正确产出 `image/jpeg` 部件与 ASCII Content-ID，不再抛 `TypeError: Could not guess image MIME subtype`。
+- **潜在风险**：无（纯文档变更）。
+- **下一步建议**：进入 TASK-G.4（Web UI 预研，docs-only，届时一并评估留档的方案 3 Pillow 管线）；完成后进入 develop→main 发布流程（R3 人工合并 / R5 合并后验证）。
+
+### 修复：英文邮件标题混入中文 + 发送邮件残留占位符装饰框（双语标题与图片渲染加固）
+
+- **修改文件**：`email_agent/email_generator.py`、`email_agent/template_engine.py`、`email_agent/template_importer.py`、`email_agent/cli_controller.py`、`prompts/template_import_prompt.md`、`tests/test_subject_image_render.py`（新增）
+- **核心逻辑**：
+  - **问题 1（英文邮件标题出现中文）**：
+    - 根因：模板 schema 只有单一 `subject_template` 字段，导入时英文模板（如 信01）落盘的是中文标题；渲染侧 `_render_subject` 不区分语言，且运行期把中文客户数据（如「字节跳动」）注入英文标题；
+    - 修复：schema 与 `config.yaml` 新增 `subject_template_cn` / `subject_template_en` 双语字段；`activate_template()` 导入时自动回填缺失变体（源语言复用单字段），并丢弃含汉字的英文变体（中文警告提示）；渲染侧 `_render_subject()` 按邮件语言选取变体，旧模板回退单字段；英文标题渲染后若含汉字（来自中文变量值或遗留中文模板），剔除含汉字变量并清理悬空连接词（如 `for |` → `|`），仍含汉字则回退纯英文通用标题；
+  - **问题 2（发出的邮件显示 `[Image placeholder: …]` 文字与破图）**：
+    - 根因 a：导入 prompt 曾指示 LLM 给 `{{IMAGE:…}}` 包裹虚线占位框，装饰框随 HTML 一起发出；根因 b：中文图片名直接用作 Content-ID（如 `信01_img_01`），违反 RFC 5322/2392，客户端（Gmail 等）无法匹配 `cid:` 引用导致破图；
+    - 修复：`template_engine.render()` 加载模板后先用 `_strip_image_placeholder_chrome()` 将两种装饰框形态（`class=*placeholder*` div、`style=*dashed*` div）整框还原为裸占位符；`_make_cid()` 为非 ASCII/非法图片名生成顺序 ASCII cid（`img_01`…），合法 ASCII 名原样保留，HTML 的 `cid:` 引用与 images 列表（附件 Content-ID）同源一致；导入 prompt §HTML 输出规范改为禁止任何装饰性包裹；
+  - **配套**：`cli_controller` 用户手动改标题时同步更新源语言变体字段，避免编辑失效；新增 8 个回归测试覆盖双语选取/回退链、CJK 变量剔除、两种装饰框剥离、ASCII cid 端到端（渲染→`create_email_message`→Content-ID 头部断言）、`_default_config_yaml` 双语字段落盘。
+- **验证**：`pytest` 98 passed（基线 90 + 新增 8）；`flake8 --select=E9,F63,F7,F82` 零命中；改动文件 flake8 全量告警数均不超过 origin/develop 基线（新测试文件零告警）；`py_compile` 全量通过。
+- **潜在风险**：
+  - 装饰框剥离正则仅匹配单层 div 包裹的占位框；嵌套或异形包裹不在覆盖范围（已覆盖现行 prompt 产出的两种形态）；
+  - 非 ASCII 图片名的 cid 改为 `img_NN`，drafts.json 中历史草稿的旧中文 cid 与正文引用不受影响（渲染与附件始终同批生成、同源一致）；
+  - 与 PR #14（图片 MIME 魔数识别，含 ICC-JPEG 修复）为姊妹修复：本分支 sender 仍为 develop 版本，端到端测试已用 JFIF 头图片规避；两 PR 合并时 CHANGELOG 的 `## 2026-08-08` 头可能冲突，按「最新在上、保留双方条目」rebase 解决。
+- **下一步建议**：合并 PR #14 与本 PR 后进入 TASK-G.4（Web UI 预研，届时一并评估已留档的方案 3 Pillow 图片管线）。
+
+### 修复：图片附件 MIME 探测加固（ICC 配置 JPEG 导致发送崩溃）
+
+- **修改文件**：`email_agent/sender.py`、`tests/test_sender_image_mime.py`（新增）
+- **问题定位**：发送含图邮件时 `MIMEImage(img_data)` 抛 `TypeError: Could not guess image MIME subtype` 且进程崩溃。根因：`MIMEImage` 依赖标准库 `imghdr.what()`，其 `test_jpeg` 仅识别 JFIF/Exif APP 标记与 `\xff\xd8\xff\xdb` 裸 DQT 开头；本项目 docx 提取图片为**内嵌 ICC 色彩配置的 JPEG**（APP2/`0xFFE2` 开头），两条判定全部落空。已用真实素材 `assets/images/信01_img_*.jpg` 复现（`imghdr` 返回 `None`）。另发现：崩溃点在 `send_email` 的 try/except 之外，失败不落 `email_logs.csv` 且中断整个发送队列。
+- **核心逻辑**：
+  - 新增 `sender.guess_image_subtype(img_data, path)`：魔数优先（JPEG 按 `\xff\xd8\xff` SOI 通配判定，不限 APP 标记；另覆盖 PNG/GIF/WebP/BMP/TIFF/ICO/SVG），扩展名兜底，均失败则抛出指明具体文件与开头字节的中文 `ValueError`；彻底移除对已弃用（Python 3.13 将移除）的 `imghdr` 的隐式依赖；
+  - `_attach_images()` 改为 `MIMEImage(img_data, _subtype=guess结果)`，CID/inline 逻辑不变；
+  - `send_email()` 将 `create_email_message()` 纳入独立 try/except：构建失败 → 记 failed 日志（含"邮件构建失败"与具体原因）、跳过该封、队列继续。
+- **潜在风险**：
+  - 扩展名兜底在"魔数未知 + 扩展名已知"时信任扩展名（改名文件可能发出错误 Content-Type，属低概率运维风险）；
+  - SVG 探测仅按 XML/`<svg` 头部粗判，主流邮件客户端对 SVG 渲染支持有限，建议素材仍用位图；
+  - `send_email()` 失败路径新增一种 error_msg 前缀（"邮件构建失败："），依赖日志文本匹配的下游需注意（当前无此类消费方）。
+- **验证**：pytest 104/104（新增 14 例：ICC-JPEG 根因回归、常见格式探测、扩展名兜底、未知格式中文异常、端到端 CID 附件、构建失败隔离）；flake8 硬门禁（E9,F63,F7,F82）零命中；sender.py 风格告警与 develop 基线持平（11）。
+- **留档（方案 3，本次未实施）**：引入 Pillow 做 `Image.open()` 识别与自动转码（SVG/HEIC/CMYK → RGB PNG 后再附件），并作为 G.4 Web UI 用户上传校验管线的基础；代价为新增重量级二进制依赖，留待 TASK-G.4 预研时在 `docs/architecture.md` 一并评估。
+- **下一步建议**：合并本 PR 后，重新发送 `信01` 草稿验证真实邮件渲染；随后进入 TASK-G.4（Web UI 预研）。
+
+## 2026-08-07
+
+### TASK-G.3：docx 图片提取与清理机制加固
+
+- **修改文件**：`email_agent/template_importer.py`、`prompts/template_import_prompt.md`、`tests/test_stage_g.py`
+- **核心逻辑**：
+  - **提取加固（`_docx_to_markdown`）**：
+    - drawing 查找由"仅直接子元素"改为后代搜索，兼容 Word 2010+ 用 `mc:AlternateContent` 包裹图片的嵌入方式（此前该类文档的图片被整条跳过，即"部分 Word 版本取不到图"的主因）；run 内无现代 drawing 时才回退解析旧版 VML（`w:pict`/`v:imagedata`），避免 Choice/Fallback 双份引用造成重复提取；
+    - blip 改为遍历 drawing 下全部（组合图形含多个），并同时支持 `r:embed` 与 `r:link` 两种引用；`related_parts.get()` 失败时增加 rels 表兜底解析；
+    - 新增包级兜底扫描：遍历文档包全部图片部件，表格、文本框、页眉页脚等 `doc.paragraphs` 之外的图片不再静默丢失（追加占位符至模板末尾并打印中文警告；`/docProps/` 缩略图不属于正文内容，明确排除）；
+  - **图片丢失 Bug 修复（`_cleanup_template_images`）**：新增 `_images_used_by_active_drafts()`，收集"待审核"（`review_status=pending`）与"待发送"（`approved` 且无成功发送记录）草稿引用的图片文件名；重新导入模板清理旧图片时，被引用的图片禁止删除并打印保留提示，其余正常清理；
+  - **prompt 强化（`template_import_prompt.md`）**：新增"占位符位置锁定（强制）"规则与对应禁止事项——`{{IMAGE:...}}`/`{{FILE:...}}` 占位符数量不得增减、相对位置不得移动、禁止合并拆分改名，双语版本与 `images`/`files` 列表必须逐一对应，返回前逐个自检。
+- **潜在风险**：
+  - 兜底扫描会把页眉/页脚中的图片（如公司 Logo）也提取并追加到 Markdown 末尾，属"宁多勿漏"的设计取舍，终端有明确警告；
+  - 兜底提取的图片占位符位于 Markdown 末尾而非原文位置，依赖 LLM 按 prompt 约束保留；
+  - 图片保护按草稿 `template` 字段过滤，历史草稿若缺失该字段则视为可能匹配而保留其图片（保守策略）。
+- **验证**：pytest 98/98 全绿（新增 8 个 G.3 测试：inline 提取、AlternateContent 包裹回归、表格图片兜底、真实素材 `开发信带图版.docx` 端到端、清理保护 4 例）；flake8 硬门禁（E9,F63,F7,F82）零命中；两文件风格告警数与 develop 基线持平（54/18）。
+- **下一步建议**：TASK-G.3 合入后进入 TASK-G.4（Web UI 预研，仅架构文档）。
+
+### TASK-G.2：双语模板分离预览与确认
+
+- **修改文件**：`email_agent/template_importer.py`、`email_agent/preview.py`、`email_agent/cli_controller.py`、`tests/test_stage_g.py`
+- **核心逻辑**：
+  - **双语分离预览**：新增 `template_importer.resolve_template_preview_files()`，按「中文在前、英文在后」解析各语言预览文件，解析规则与 `template_engine.render()` 一致（优先 `template_<lang>.html`，缺失时回退 `template.html`——即源语言文件）；`preview.open_template_preview()` 改为依次打开每个语言版本的独立预览窗口并显示进度（如"正在打开中文版模板预览（1/2）"），返回打开的文件路径列表；`build_preview_html()` 新增 `language` 参数，预览页标题/横幅标注语言；
+  - **缺失/空文件明确提示**：语言变体文件缺失时提示"缺少 template_<lang>.html，将显示默认 template.html"；变体文件存在但内容为空（LLM 生成缺失的后果）时警告并回退默认模板；完全无可用文件时跳过该语言预览并警告，不再静默打开空窗口；
+  - **"language 生成失败"容错**：`structure_template_with_llm()` 对 LLM 返回做三层防护——缺少 `content` 字段、JSON 解析失败（原报 `Expecting value: line 1 column 1`）、返回非对象，均抛出可理解的中文错误并建议重试/切换模型；字段命名不符（如 `chinese_html`/`zh_html`/`html_cn`）自动归一化为 `cn_html`/`en_html` 并提示；任一语言 HTML 为空时打印明确中文警告；
+  - **写盘防护**：`write_structured_template()` 源语言 HTML 为空时抛出 `ValueError`（禁止写出空 `template.html`）；目标语言为空时不再写空文件，`other_path` 返回 `None` 并警告，CLI 导入结果展示相应改为"未生成（见上方警告）"；
+  - **元数据**：`config.yaml` 新增持久化 `source_language` 字段，供后续预览与诊断使用。
+- **潜在风险**：
+  - `open_template_preview()` 返回类型由单个路径字符串变为路径列表（现网唯一调用方 `_confirm_template_flow` 已同步更新；测试桩返回字符串不受影响）；
+  - 旧模板（手写、仅含 `template.html`）确认时只打开一个预览窗口并提示缺少变体文件，属预期行为；
+  - `config.yaml` 新增字段为纯增量，现有读取方均用 `.get()`，无兼容性问题。
+- **下一步建议**：进入 TASK-G.3（docx 图片提取机制加固）。
+
+## 2026-08-06
+
+### TASK-G.1：终端 UI 与文案净化
+
+- **修改文件**：`email_agent/cli_controller.py`、`email_agent/preview.py`、`tests/test_stage_g.py`（新增）
+- **核心逻辑**：
+  - **清屏机制**：所有 `menu_*` 菜单入口及设置/模板两个子菜单循环的每轮迭代起始处调用 `_clear_screen()`，保证每次进入新菜单时界面清爽；`_clear_screen()` 增加 `sys.stdout.isatty()` 守卫，非交互环境（测试/管道/重定向）自动跳过，不产生清屏转义与 TERM 噪音；
+  - **Playwright 报错净化**：`preview._open_with_playwright()` 捕获启动异常后不再打印原始英文异常栈，headed 失败输出"未检测到本地浏览器环境，将尝试截图或手动查看"，headless 失败输出含 `playwright install chromium` 指引的一句中文提示，后续降级逻辑不变；
+  - **文案统一**：模板确认/选择流程中"设为生效模板"统一为"设为当前生效模板"；经全仓 grep 确认"强制生效""覆盖自动阶段"等旧概念文案在当前代码中已无残留（早先的阶段 A 提交已移除，人工测试记录中为旧版行为）。
+- **潜在风险**：
+  - 清屏依赖 `clear`/`cls` 系统命令，极端精简容器环境可能无效但不影响功能；
+  - Playwright 失败提示不再包含异常细节，深度排障需手动运行 `playwright install chromium` 或查看日志。
+- **下一步建议**：进入 TASK-G.2（双语模板分离预览与确认）。
+
+### 修复 test_stage_d 英文日期断言跨日失败
+
+- **修改文件**：`tests/test_stage_d.py`
+- **核心逻辑**：
+  - `test_english_date_has_no_leading_zero` 原断言硬编码编写当日日期（`"August 6, 2026"`），跨日即失败（2026-08-07 基线跑出 1 failed/74 passed）；
+  - 改为按 `email_generator._current_date()` 的英文格式（`f"{now.strftime('%B')} {now.day}, {now.year}"`）动态计算期望值；仅当 `now.day < 10` 时校验无前导零形式，保持原测试意图不变。
+- **潜在风险**：无（测试断言与被测代码使用同一格式逻辑，若未来 `_current_date` 英文格式变更，测试将同步暴露）。
+- **下一步建议**：合入后 develop 基线恢复 75/75 全绿，可进入阶段 G.1。
+
+### TASK-R2：README 补充模板导入依赖说明
+
+- **修改文件**：`README.md`
+- **核心逻辑**：
+  - 在「前期环境及权限部署准备 → 1. 基础环境」章节补充说明：模板导入功能依赖 `python-docx`（Word 解析）与 `pdfplumber`（PDF 提取），两者已包含在 `requirements.txt`，随 `pip install -r requirements.txt` 一并安装；旧环境可单独补装 `pip install python-docx pdfplumber`；
+  - 收尾 2026-08-06 复合性审查报告（`docs/bug_report.md` 历史版本 98921b3）遗留的 Minor 项②。安装主命令不变。
+- **潜在风险**：无（纯文档变更）。
+- **下一步建议**：等待 R1/R2 两个 PR 合入 develop 后，进入阶段 G.1（终端 UI 与文案净化）。
+
+### TASK-R1：修正 .gitignore 并归档人工测试记录
+
+- **修改文件**：`.gitignore`、`templates/email/.gitkeep`（新增）、`docs/manual_test_record.md`（由 `tests/人工测试_test.md` 移动归档）
+- **核心逻辑**：
+  - 删除 `.gitignore` 中的 `tests` 忽略规则——本分支已跟踪 11 个测试文件，该规则会静默吞掉未来新增的测试文件，造成测试套件缺口；
+  - 保留 `.claude` 忽略项（本地工具状态，不入库）；
+  - 新增 `templates/email/*` + `!templates/email/.gitkeep`：模板导入器的运行时产物不入库（镜像既有 `templates/archive/` 模式），本地 `templates/email/开发信测试/` 保留作为阶段 G.2/G.3 的缺陷复现素材；
+  - 将未跟踪的手工测试记录 `tests/人工测试_test.md` 移入 `docs/manual_test_record.md` 归档，避免与自动化测试目录混淆。
+- **潜在风险**：
+  - `templates/email/` 被整体忽略，若未来有需入库的预置邮件模板，需用 `git add -f` 或调整规则；
+  - 人工测试记录移入 `docs/` 后，原路径引用（如有）需更新。
+- **下一步建议**：继续 TASK-R2（README 补充 python-docx/pdfplumber 依赖说明），随后进入阶段 G 修复。
+
+### 阶段 E：邮件主题非空兜底与导入后用户编辑
+
+- **修改文件**：`email_agent/template_importer.py`、`email_agent/cli_controller.py`、`prompts/template_import_prompt.md`、`tests/test_stage_e.py`
+- **核心逻辑**：
+  - 模板导入 prompt 新增邮件主题强制规则：`subject_template` 禁止为空，无标题时按正文首段/首句自动生成 ≤60 字符主题；
+  - `template_importer.activate_template()` 对 LLM 返回的空 `subject_template` 自动按 Markdown 首标题/首行兜底，打印黄色警告；
+  - `cli_controller._import_template_flow()` 导入成功后以 ANSI 加粗青色高亮当前主题，支持 `[Enter]` 接受或直接输入新主题回写 `config.yaml`；
+- **潜在风险**：
+  - 自动兜底主题依赖 Markdown 结构，若原文既无标题也无正文将回退到固定英文默认主题；
+  - 用户编辑主题时只更新 `config.yaml`，不会同步修改已生成草稿的主题（已生成草稿保留旧主题）。
+- **下一步建议**：进入阶段 C（DOCX 图片提取与发送前缺失图片预检）或阶段 F（Playwright GUI 检测），请确认优先执行哪一项。
+
+### 阶段 E 优化（同步 main 文档后）
+
+- **修改文件**：`email_agent/email_generator.py`、`email_agent/template_importer.py`、`prompts/template_import_prompt.md`、`tests/test_stage_e.py`
+- **核心逻辑**：
+  - 按 PRD §3.4 与 TASK-E.1 细化 prompt：明确主题来源（有标题提取/无标题自动生成）、可选变量（`CUSTOMER_COMPANY`、`CUSTOMER_FIRST_NAME`、`CUSTOMER_INDUSTRY`、`SENDER_MARKET_REGION`）、自然融入原则、禁止生硬拼接、长度约束（英文 ≤10 词/中文 ≤20 字）；
+  - `email_generator._render_subject()` 支持缺失变量替换为空并收集，与正文使用同一变量字典，确保最终 `subject` 不含未解析 `{{...}}`；
+  - `template_importer.activate_template()` 在英文模板主题中检测到汉字时追加语言纯净度警告；
+- **潜在风险**：
+  - 长度/自然度规则依赖 LLM 遵循，导入侧只做兜底和空值警告，无法 100% 拦截不符合要求的主题；
+  - 英文主题汉字警告仅针对 source_lang == "en" 的模板，中文模板不强制检测英文混入。
+- **下一步建议**：进入阶段 C 或阶段 F，请确认优先执行哪一项。
+
+### 阶段 C：图片/附件自动提取、CID 内联与发送前预检
+
+- **修改文件**：`email_agent/template_importer.py`、`email_agent/sender.py`、`tests/test_stage_c.py`
+- **核心逻辑**：
+  - `_docx_to_markdown()` 遍历 DOCX 段落 run，识别 `w:drawing` 内联图片，按 `<template_name>_img_NN.<ext>` 保存到 `assets/images/`，并在 Markdown 对应位置插入 `{{IMAGE:<name>}}`；
+  - `extract_to_markdown()` 新增 `template_name` 参数并透传；`activate_template()` 导入前先清理该模板旧图，避免序号与文件残留；
+  - `sender.create_email_message()` 以 `MIMEImage` + `Content-ID` + `Content-Disposition: inline` 方式附加图片，实现正文 CID 内联显示；
+  - 新增 `sender.check_draft_images()`，`process_queue()` 发送循环前检查图片路径，缺失时黄色清单警告并 `(y/N)` 询问是否继续；
+- **潜在风险**：
+  - 当前仅处理 DOCX 正文段落内联图，未覆盖表格、页眉页脚、VML 旧格式图片；PDF 图片提取也未实现；
+  - 缺失图片继续发送后，邮件客户端会在原位置显示空白或红叉。
+- **下一步建议**：进入阶段 F（Playwright GUI 检测与醒目截图路径），确认后继续。
+
+### 阶段 F：Playwright 预览环境检测与无 GUI 截图路径高亮
+
+- **修改文件**：`email_agent/preview.py`、`tests/test_stage_f.py`
+- **核心逻辑**：
+  - 新增 `preview._has_gui()`：macOS/Windows 默认有 GUI；Linux 需 `DISPLAY` 环境变量且非 WSL；WSL 一律视为无 GUI。
+  - `_open_html()` 入口处根据 `_has_gui()` 直接选择模式：有 GUI 先试 `headless=False`，失败再回退 `headless=True`；无 GUI 直接走 `headless=True` 截图，避免无效的 headed 尝试与延迟。
+  - 无 GUI 截图路径使用 ANSI 加粗黄色高亮输出，防止用户错过。
+- **潜在风险**：
+  - 在 WSLg 等带 DISPLAY 的 WSL 环境会被强制视为无 GUI，需手动打开截图；如需支持 WSLg，可后续放宽 `_is_wsl()` 判断。
+  - -headed 失败回退截图时，终端已输出失败警告，可能让用户误以为预览出错。
+- **下一步建议**：进入 Step 4 全量测试 + 手动验收 + CHANGELOG 归档 + PR #2。
+
 ## 2026-08-05
 
 ### Bug Report 修复（feature/local-template-replace 黑盒测试）

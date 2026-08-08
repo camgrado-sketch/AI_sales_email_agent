@@ -5,6 +5,7 @@ import re
 import shlex
 import shutil
 import subprocess
+import sys
 import tempfile
 
 from email_agent import config, data_store, template_importer
@@ -48,6 +49,19 @@ def _is_wsl():
             return "microsoft" in release or "wsl" in release
     except Exception:
         return False
+
+
+def _has_gui():
+    """Return True when the environment is likely to support a headed browser.
+
+    macOS and Windows are assumed to have a GUI. On Linux, require a DISPLAY
+    environment variable and exclude WSL/SSH-like headless environments.
+    """
+    if sys.platform == "darwin" or sys.platform.startswith("win"):
+        return True
+    if _is_wsl():
+        return False
+    return bool(os.environ.get("DISPLAY"))
 
 
 def _open_with_browser_command(cmd, path):
@@ -123,18 +137,22 @@ def _open_with_playwright(path, headless=False):
                 screenshot_path = os.path.join(config.DATA_DIR, "latest_preview.png")
                 os.makedirs(config.DATA_DIR, exist_ok=True)
                 page.screenshot(path=screenshot_path, full_page=True)
-                print(f"📸 已生成 PNG 预览：{screenshot_path}")
+                print(
+                    f"\033[1m\033[93m📸 已生成 PNG 预览：{screenshot_path}\033[0m"
+                )
             # Keep the browser open in headed mode until the user closes it.
             # In headless mode we close immediately after screenshot.
             if not headless:
                 input("\n[Enter] 关闭浏览器预览并继续...")
             browser.close()
         return True
-    except Exception as e:
+    except Exception:
+        # 不向用户打印原始异常（Playwright 的英文报错通常很长），
+        # 只给出一句简短的中文提示，后续由 _open_html 继续降级处理。
         if headless:
-            print(f"⚠️ Playwright headless 截图失败：{e}")
+            print("⚠️ 预览截图生成失败。若未安装浏览器内核，请执行：playwright install chromium")
         else:
-            print(f"⚠️ Playwright headed 启动失败（可能无桌面环境）：{e}")
+            print("⚠️ 浏览器预览启动失败（未检测到本地浏览器环境），将尝试截图或手动查看。")
         return False
 
 
@@ -161,20 +179,31 @@ def _open_with_system_browser(path):
 
 
 def _open_html(html, suffix=".html"):
-    """Write HTML to a temp file and open it with Playwright, falling back as needed."""
+    """Write HTML to a temp file and open it with Playwright, falling back as needed.
+
+    On systems with a GUI (macOS/Windows, or Linux with DISPLAY and not WSL),
+    try Playwright headed first. Otherwise go straight to a headless screenshot.
+    """
     path = _write_temp_html(html, suffix=suffix)
 
-    # Primary: Playwright headed Chromium
-    if _open_with_playwright(path, headless=False):
-        return path
+    if _has_gui():
+        # Primary: Playwright headed Chromium
+        if _open_with_playwright(path, headless=False):
+            return path
 
-    # Fallback 1: Playwright headless screenshot
-    if _open_with_playwright(path, headless=True):
-        _copy_to_latest_preview(path)
-        print(f"🌐 临时 HTML 文件：{path}")
-        return path
+        # Fallback: Playwright headless screenshot
+        if _open_with_playwright(path, headless=True):
+            _copy_to_latest_preview(path)
+            print(f"🌐 临时 HTML 文件：{path}")
+            return path
+    else:
+        # Headless environments: screenshot directly, no invalid headed attempt
+        if _open_with_playwright(path, headless=True):
+            _copy_to_latest_preview(path)
+            print(f"🌐 临时 HTML 文件：{path}")
+            return path
 
-    # Fallback 2: system browser / webbrowser / WSL
+    # Fallback: system browser / webbrowser / WSL
     if _open_with_system_browser(path):
         return path
 
@@ -234,9 +263,31 @@ def open_draft_preview(draft):
 
 
 def open_template_preview(template_name):
-    """Open a browser preview of an active template with placeholders highlighted."""
-    preview_html = template_importer.build_preview_html(template_name)
-    return _open_html(preview_html, suffix="_template.html")
+    """Open browser previews of an active template, one window per language.
+
+    Language variants are opened sequentially (Chinese first, English second)
+    so the user can review both versions before confirming the template.
+
+    Returns:
+        List of opened temp-file paths (may be empty when no file is available).
+    """
+    variants = template_importer.resolve_template_preview_files(template_name)
+    if not variants:
+        print(f"⚠️ 模板 '{template_name}' 没有可用的模板文件，无法打开预览。")
+        return []
+
+    paths = []
+    total = len(variants)
+    for index, variant in enumerate(variants, start=1):
+        if total > 1:
+            print(f"\n🔍 正在打开{variant['label']}模板预览（{index}/{total}）...")
+        preview_html = template_importer.build_preview_html(
+            template_name, language=variant["language"]
+        )
+        paths.append(
+            _open_html(preview_html, suffix=f"_template_{variant['language']}.html")
+        )
+    return paths
 
 
 def open_replies_preview(replies):

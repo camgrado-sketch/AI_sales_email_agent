@@ -24,6 +24,62 @@ def _is_skipped_customer(draft):
     return False
 
 
+# Magic-byte signatures for common raster image formats.
+# JPEG is matched on the SOI marker only: APP segments (JFIF, Exif, ICC
+# profile, ...) vary between encoders, so stricter checks reject valid files.
+_IMAGE_MAGIC = (
+    (b"\xff\xd8\xff", "jpeg"),
+    (b"\x89PNG\r\n\x1a\n", "png"),
+    (b"GIF87a", "gif"),
+    (b"GIF89a", "gif"),
+    (b"BM", "bmp"),
+    (b"II\x2a\x00", "tiff"),
+    (b"MM\x00\x2a", "tiff"),
+    (b"\x00\x00\x01\x00", "x-icon"),
+)
+
+_EXT_SUBTYPES = {
+    ".jpg": "jpeg",
+    ".jpeg": "jpeg",
+    ".png": "png",
+    ".gif": "gif",
+    ".webp": "webp",
+    ".bmp": "bmp",
+    ".tif": "tiff",
+    ".tiff": "tiff",
+    ".svg": "svg+xml",
+    ".ico": "x-icon",
+}
+
+
+def guess_image_subtype(img_data, path):
+    """Detect an image MIME subtype from content, falling back to extension.
+
+    MIMEImage without an explicit _subtype relies on stdlib imghdr, which
+    misses valid images (e.g. JPEGs carrying an ICC colour profile) and is
+    removed in Python 3.13, so detection lives here.
+
+    Raises ValueError with an actionable Chinese message when neither the
+    content nor the extension identifies the file as an image.
+    """
+    for magic, subtype in _IMAGE_MAGIC:
+        if img_data.startswith(magic):
+            return subtype
+    if img_data[:4] == b"RIFF" and img_data[8:12] == b"WEBP":
+        return "webp"
+    stripped = img_data.lstrip()
+    if stripped.startswith(b"<?xml") or stripped.startswith(b"<svg"):
+        return "svg+xml"
+    ext = os.path.splitext(path)[1].lower()
+    if ext in _EXT_SUBTYPES:
+        return _EXT_SUBTYPES[ext]
+    head = " ".join(f"{b:02x}" for b in img_data[:8]) or "(空文件)"
+    raise ValueError(
+        f"无法识别图片格式：{path}（开头字节：{head}）。"
+        "请确认文件为有效的 PNG/JPEG/GIF/WebP 等图片，或删除该占位符后重试。"
+    )
+
+
 def _attach_images(msg, images):
     """Attach inline images with Content-ID headers."""
     for image in images:
@@ -33,10 +89,27 @@ def _attach_images(msg, images):
             continue
         with open(path, "rb") as f:
             img_data = f.read()
-        mime_image = MIMEImage(img_data)
+        subtype = guess_image_subtype(img_data, path)
+        mime_image = MIMEImage(img_data, _subtype=subtype)
         mime_image.add_header("Content-ID", f"<{cid}>")
         mime_image.add_header("Content-Disposition", "inline", filename=os.path.basename(path))
         msg.attach(mime_image)
+
+
+def check_draft_images(drafts):
+    """Return a list of image cids whose referenced files are missing on disk."""
+    missing = []
+    seen = set()
+    for draft in drafts:
+        for image in draft.get("images", []):
+            path = image.get("path")
+            cid = image.get("cid") or path or "unknown"
+            if cid in seen:
+                continue
+            seen.add(cid)
+            if not path or not os.path.exists(path):
+                missing.append(cid)
+    return missing
 
 
 def create_email_message(draft):
@@ -52,7 +125,8 @@ def create_email_message(draft):
     msg["To"] = recipient
     msg["Subject"] = Header(subject, "utf-8")
 
-    domain = config.EMAIL_ACCOUNT.split("@")[1] if "@" in config.EMAIL_ACCOUNT else "local"
+    account = config.EMAIL_ACCOUNT or ""
+    domain = account.split("@")[1] if "@" in account else "local"
     msg_id = make_msgid(domain=domain)
     msg["Message-ID"] = msg_id
 
@@ -88,8 +162,28 @@ def send_email(draft):
         )
         return False
 
-    msg, msg_id = create_email_message(draft)
     email_id = draft.get("draft_id") or f"{datetime.now().strftime('%Y%m%d')}-{customer_id}"
+
+    try:
+        msg, msg_id = create_email_message(draft)
+    except Exception as e:
+        # A malformed attachment must not crash the whole sending queue,
+        # and the failure must be visible in email_logs.csv.
+        error_msg = f"邮件构建失败：{e}"
+        print(
+            f"❌ Failed: Could not build email for {recipient}. "
+            f"Error: {error_msg}"
+        )
+        log_email_send(
+            email_id=email_id,
+            customer_id=customer_id,
+            recipient=recipient,
+            subject=subject,
+            status="failed",
+            error_msg=error_msg,
+            message_id="",
+        )
+        return False
 
     try:
         print(f"Connecting to {config.SMTP_SERVER}...")
@@ -175,6 +269,17 @@ def process_queue(drafts=None):
         return
 
     print(f"Found {len(to_send)} approved draft(s) to send. Press Ctrl+C to pause.")
+
+    missing_images = check_draft_images(to_send)
+    if missing_images:
+        print(
+            f"\033[93m⚠️  以下图片文件缺失，邮件正文可能出现空白："
+            f"{', '.join(missing_images)}\033[0m"
+        )
+        confirm = input("图片缺失，是否仍继续发送？ (y/N): ").strip().lower()
+        if confirm != "y":
+            print("已取消发送。")
+            return
 
     remaining = list(to_send)
     try:
