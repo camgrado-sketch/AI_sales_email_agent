@@ -1,5 +1,10 @@
 # 架构设计文档 (architecture.md)
 
+> **Architecture Owner: Codex (CTO)**  
+> **Governance Status:** Existing baseline; future structural changes require an approved Technical Spec/ADR and Codex architecture review.  
+> **Product authority:** Manus owns WHY/WHAT; this document must not redefine approved product scope.
+
+
 > 本文档依据 `docs/PRD.md`（v2.0）与 `docs/UserFlow.md` 重写，反映阶段 A-F 完成后的目标架构。
 > 核心原则：**LLM 仅负责模板导入时的一次性结构化解析；批量邮件生成完全通过本地变量替换实现，不消耗 LLM 算力。**
 

@@ -1,0 +1,71 @@
+name: 协同开发 Task
+description: 为 Manus → Codex → Claude Code 创建可交接、可验收的任务
+title: "[Task]: "
+labels: ["task"]
+body:
+  - type: input
+    id: task_id
+    attributes:
+      label: Task ID
+      placeholder: TASK-XXX
+    validations:
+      required: true
+  - type: textarea
+    id: product_refs
+    attributes:
+      label: PRD / UserFlow 引用
+      description: 填写文档路径、版本和章节。
+    validations:
+      required: true
+  - type: textarea
+    id: business_goal
+    attributes:
+      label: 业务目标（WHY）
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: In Scope / Out of Scope
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: 验收标准与黑盒场景
+      description: 每一项都必须可验证。
+    validations:
+      required: true
+  - type: dropdown
+    id: codex_required
+    attributes:
+      label: 是否需要 Codex
+      options:
+        - "true — 需要 Technical Spec / 架构评审"
+        - "false — 满足全部小任务直通条件"
+    validations:
+      required: true
+  - type: textarea
+    id: codex_reason
+    attributes:
+      label: Codex 门禁判断依据
+      description: 说明是否涉及模块/API/Schema/安全/依赖/基础设施/非功能目标或架构文档。
+    validations:
+      required: true
+  - type: input
+    id: technical_spec
+    attributes:
+      label: Technical Spec
+      placeholder: docs/technical-specs/TASK-XXX.md 或 N/A
+    validations:
+      required: true
+  - type: dropdown
+    id: approval_status
+    attributes:
+      label: 产品批准状态
+      options:
+        - Draft
+        - Approved
+        - Blocked
+    validations:
+      required: true

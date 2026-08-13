@@ -1,27 +1,65 @@
-## Task / Bug ID
-- Task ID: # (例如 TASK-001)
-- Bug ID: # (如有)
+## Task / 产品依据
 
-## 功能描述 (Description)
-请简要描述本次 PR 解决了什么问题或实现了什么功能。
+- Task ID：
+- PRD / UserFlow：
+- Technical Spec / ADR：
+- `codex_required`：true / false
+- `codex_reason`：
+- Architecture Review：Required / Not Required
 
-## 修改内容 (Changes)
-- [ ] 修改了 `src/xxx.py` 的逻辑
-- [ ] 增加了 `tests/xxx.py`
-- [ ] 其他：
+## 目的与范围
 
-## 影响范围 (Impact)
-描述本次修改可能影响到的其他模块。
+- 要解决的问题：
+- In Scope：
+- Out of Scope：
 
-## 测试结果 (Test Results)
-- [ ] 本地单元测试已通过
-- [ ] 核心流程已手动验证
+## 修改内容
 
-## Review Checklist
-- [ ] 代码符合项目架构规范
-- [ ] Commit Message 符合规范
-- [ ] 没有提交任何敏感信息 (API Keys, 真实客户数据等)
-- [ ] 已经更新 CHANGELOG.md (如适用)
+- [ ] 产品文档
+- [ ] Architecture / Technical Spec / ADR
+- [ ] 代码 / 配置 / 迁移
+- [ ] 测试
+- [ ] 验收或审查报告
 
-## Screenshot (如适用)
-(在此处粘贴截图)
+## 验证证据
+
+```text
+列出实际执行的命令、结果和必要的人工验证。
+```
+
+## 风险与回滚
+
+- 影响模块：
+- 数据 / 安全 / 隐私影响：
+- 已知限制：
+- 回滚方式：
+
+## 审查门禁
+
+### Claude Code 自审
+
+- [ ] 实现符合已批准 Task 与 Technical Spec
+- [ ] 未越界修改 PRD、UserFlow、Tasks、Architecture 或 ADR
+- [ ] 无硬编码秘密或真实用户数据
+- [ ] 异常处理、兼容性和回归测试已检查
+
+### Codex 架构审查
+
+- [ ] Not Required，且满足小任务直通条件
+- [ ] Approved
+- [ ] Changes Requested
+- [ ] Blocked
+
+### Manus PRD 符合性
+
+- [ ] Accepted
+- [ ] Accepted with Known Limitations
+- [ ] Changes Requested
+- [ ] Blocked
+
+## 最终合并
+
+- [ ] CI 通过
+- [ ] 所需审查完成
+- [ ] 冲突已由用户裁决
+- [ ] 等待用户决定是否合并到 `develop`
