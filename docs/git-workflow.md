@@ -1,64 +1,91 @@
-# AI Agent 协同 Git 工作流规范 (Git Workflow)
+# Git 与三角色协同工作流
 
-本文档定义了本仓库在 "人类 (CEO) + Manus (PM/QA) + Claude Code (Dev)" 协同模式下的 Git 管理规范。
+## 1. 角色
 
-## 1. Git 分支模型设计
+| 角色 | 决策范围 | 主要输出 |
+|---|---|---|
+| 用户 | 最终业务裁决、重大风险、合并与发布 | 批准/拒绝 |
+| Manus（PM） | WHY / WHAT | `docs/PRD.md`、`docs/UserFlow.md`、`tasks/TASK.md`、验收与 PRD 符合性审查 |
+| Codex（CTO） | HOW | Architecture、Technical Spec、ADR、技术风险、架构审查 |
+| Claude Code（Senior Engineer） | BUILD | 实现、测试、Debug、自审、PR |
 
-本仓库采用精简的双层分支模型，取消传统的 `develop` 分支，直接通过功能分支集成到 `main`。
+角色不得互相覆盖：Manus 不改技术架构；Codex 不改业务目标且不承担常规编码；Claude Code 不改产品目标或核心架构。
 
-- **`main`**: 项目的唯一主分支，代表"项目最新认知状态"（包含最新文档、稳定代码）。**严禁任何人直接向 main 推送代码修改。**
-- **临时分支**: 所有代码修改必须在临时分支进行，完成后通过 Pull Request (PR) 合并回 `main`，合并后立即删除。
+## 2. 三层分支
 
-## 2. 分支命名规范
+```text
+feature/* 或 fix/*
+        ↓ PR + CI + 所需审查
+develop
+        ↓ 发布 PR + 用户最终确认
+main
+```
 
-| 分支类型 | 命名格式 | 说明 | 负责人 |
-| :--- | :--- | :--- | :--- |
-| **新功能** | `feature/<task-name>` | 开发新需求（如 `feature/email-template`） | Claude Code |
-| **Bug修复** | `fix/<bug-name>` | 修复已知问题（如 `fix/smtp-timeout`） | Claude Code |
-| **代码重构** | `refactor/<module>` | 不改变功能的代码结构优化 | Claude Code |
-| **紧急修复** | `hotfix/<issue>` | 线上紧急问题修复 | 本地 (CEO) / Claude Code |
-| **文档更新** | `docs/<topic>` | 大型文档重构（日常小更新可直接进 main） | Manus |
-| **测试完善** | `test/<module>` | 补充或修改测试用例 | Claude Code |
+| 分支 | 定位 | 直接 commit/push |
+|---|---|---|
+| `main` | 稳定发布基线 | 禁止 |
+| `develop` | 日常集成与验收 | 禁止 |
+| `feature/*` | 产品、架构、功能、重构、治理 | 允许 |
+| `fix/*` | Bug 修复 | 允许 |
 
-## 3. 分支生命周期
+产品文档、技术文档和代码遵循同一流程。原有“文档直接提交 main”规则废止，避免 `main` 与 `develop` 产生认知分叉。
 
-1. **创建**: 每次开始 Task 前，从最新的 `main` 创建分支。(`git checkout -b feature/xxx`)
-2. **开发**: 在独立分支上进行代码修改，保持原子化提交。
-3. **提交**: 遵循 Conventional Commit 规范进行 `git commit`。
-4. **Push**: 将分支推送到远程仓库。(`git push -u origin feature/xxx`)
-5. **Pull Request**: 在 GitHub 上发起 PR，关联对应的 Task ID 或 Issue。
-6. **Merge**: 由本地 (CEO) 审核通过后，执行 Merge（推荐 Squash and merge）。
-7. **删除**: 合并完成后，立即删除远程和本地分支。
+## 3. Task 门禁
 
-## 4. AI Agent 协作流程
+Task 必须记录：
 
-- **Manus 职责**: 
-  - 负责维护 `docs/`、`tasks/`、`.manus/` 目录。
-  - 将 Epic 拆解为 Task 并更新 `TASKS.md`，相关文档变更直接提交并 push 到 `main`。
-  - 执行黑盒测试，发现问题生成 Bug Report 并直接提交到 `main`。
-- **Claude Code 职责**:
-  - 接收到 Task 或 Bug Report 后，**必须先拉取最新 main**。
-  - 创建对应的 `feature/` 或 `fix/` 分支。
-  - 完成编码和单元测试，按规范 commit 并 push。
-  - 输出 `CHANGELOG.md` 总结，并发起 PR 等待审核。
-- **本地 (CEO) 职责**:
-  - 解决冲突裁决。
-  - 审核 PR 并执行合并。
+```yaml
+codex_required: true | false
+codex_reason: "判断依据"
+technical_spec: docs/technical-specs/TASK-XXX.md | N/A
+approval_status: Draft | Approved | Blocked | Done
+```
 
-## 5. Commit Message 规范
+以下任一情形必须经过 Codex：新模块/服务、公共 API、跨模块依赖、Schema/迁移、核心数据语义、安全/隐私、关键依赖、部署/CI、性能/容量/可靠性、跨模块重构、Architecture/ADR 变化或技术不确定性。
 
-采用 Conventional Commits 规范，格式为：`type(scope): description`。
+只有单一既有模块、默认不超过 3 个实现文件、不触及上述边界、可回滚且可测试的任务才可跳过 Codex。
 
-**允许的 Type:**
-- `feat`: 新功能 (Feature)
-- `fix`: 修复 Bug
-- `refactor`: 重构 (既不增加新功能，也不修复 bug 的代码变动)
-- `docs`: 文档变更 (Documentation)
-- `test`: 增加测试
-- `chore`: 构建过程或辅助工具的变动 (如更新依赖)
+## 4. 标准交接
 
-**AI 协作专属前缀 (可选但推荐):**
-为了清晰追踪是谁做的修改，可在开头加上角色标识：
-- `[Manus] docs(prd): 新增邮件模板需求`
-- `[Claude] feat(email): 实现模板变量替换`
-- `[Local] chore: 更新 GitHub Actions 配置`
+### 复杂任务
+
+```text
+Manus Product Approved Task
+→ Codex Approved Technical Spec
+→ Claude Code 实现、测试、自审、PR
+→ Codex 架构审查
+→ Manus 黑盒验收与 PRD 符合性审查
+→ 用户决定是否合并到 develop
+```
+
+### 小任务
+
+```text
+Manus Approved Task（codex_required: false）
+→ Claude Code 实现、测试、自审、PR
+→ Manus 验收
+→ 用户决定是否合并到 develop
+```
+
+### 发布
+
+由用户发起或批准 `develop → main` PR。
+
+## 5. 审查状态
+
+触发架构门禁的 PR 标记 `architecture-review-required`，Codex 给出 `Approved`、`Changes Requested` 或 `Blocked`。未 Approved 前，Manus 不给出最终 Accepted。
+
+Manus 的验收结论：`Accepted`、`Accepted with Known Limitations`、`Changes Requested` 或 `Blocked`。
+
+## 6. 提交前缀
+
+```text
+[Manus] docs(prd|flow|task|research|acceptance|governance): description
+[Codex] docs(arch|spec|adr|risk): description
+[Codex] review(arch): description
+[Claude] feat|fix|refactor|test|docs|chore(scope): description
+```
+
+## 7. 冲突
+
+任何 merge、rebase、cherry-pick、文件所有权或语义冲突都必须立即停止。报告冲突文件、当前版本、incoming 版本、来源和影响，等待用户决定。禁止自动选择、覆盖、强推或重写历史。

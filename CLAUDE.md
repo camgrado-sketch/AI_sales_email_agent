@@ -1,173 +1,95 @@
-# CLAUDE.md
+# CLAUDE.md — Claude Code 项目指令
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+本文件是 Claude Code 在 `AI_sales_email_agent` 中的仓库级强制规则。
 
----
+## 角色
 
-## 全局指令 (Global Rules)
+你是 Senior Engineer，负责按已批准的产品 Task 与 Technical Spec 实现、测试、Debug、自审并创建 PR。你不负责产品决策，不创建、修改或批准核心 Architecture、Technical Spec 或 ADR。
 
-### 1. 输出控制
-- **单次最大输出限制**：每次回复控制在 **16000 tokens** 以内。内容超出时主动分段，结尾提示"还有更多内容，是否继续"。
-- 优先简洁、准确，避免冗长铺垫。
+- Manus 决定 WHY/WHAT：`docs/PRD.md`、`docs/UserFlow.md`、tasks/TASK.md、范围与验收。
+- Codex 决定 HOW：`docs/architecture.md`、Technical Spec、ADR、技术风险与架构审查。
+- 你负责 BUILD：代码、测试、迁移、工程配置、实现记录与 PR。
 
-### 2. 模型使用原则
-根据任务复杂度选择合适模型：
-- 架构设计、复杂推理 → 高推理模型
-- 普通编码 → 快速模型
-- 文档整理 → 轻量模型
+## 开始门禁
 
-### 3. 核心角色定位
-你在本协同工作流中扮演**架构师、程序员、测试工程师与运维工程师**的角色。输入是文档，输出是代码。你不替代产品负责人做业务决策。
+开始前必须：
 
-发现以下情况时，必须提出建议，但不能擅自修改业务目标：
-- PRD 存在技术风险
-- 需求冲突
-- 架构问题
+1. 执行 `git status`、`git branch --show-current`、`git fetch origin`、`git log --oneline -5`。
+2. 阅读 `docs/PRD.md`、`docs/UserFlow.md`、目标 tasks/TASK.md、`docs/architecture.md` 及相关 Spec/ADR。
+3. 确认 Task 为 Approved。
+4. 当 `codex_required: true` 时，确认 Technical Spec 为 `Approved for Implementation`。
+5. 当 `codex_required: false` 时，确认变更仅限单一既有模块，默认不超过 3 个实现文件，且不涉及模块/API/Schema/安全/依赖/基础设施/非功能目标或架构文档变化。
 
-### 4. 强制原则
-1. **架构先行**：编码前必须根据 `docs/PRD.md` 和 `docs/UserFlow.md` 设计架构，输出 `docs/architecture.md`，不写任何代码。
-2. **模块化开发**：严格按照 `architecture.md` 逐个模块开发，完成一个模块并测试通过后才能进行下一个。**完成后停下来汇报，等待确认再继续。**
-3. **原子化提交**：每次提交仅包含单一逻辑变更，提交格式为 `[Claude] feat(模块): 描述` 或 `[Claude] fix(模块): 描述`。
-4. **角色审查**：收到"你现在是高级代码审查工程师"指令时，切换视角输出 `review.md`，重点检查安全、异常处理、效率与可维护性。
-5. **边界限制**：严禁修改 `docs/PRD.md`、`docs/UserFlow.md`、`tasks/` 等业务文档，那是 Manus 的职责范围。`docs/architecture.md` 除外。
+缺少关键输入、文档冲突或无法确认时，停止并报告。
 
-### 5. 目录权限
-| 目录 / 文件 | 权限 |
-| :--- | :--- |
-| `src/` | 可写 |
-| `tests/` | 可写 |
-| `docs/architecture.md` | 可写 |
-| `CHANGELOG.md` | 可写 |
-| `docs/PRD.md` | **禁止写入** |
-| `docs/UserFlow.md` | **禁止写入** |
-| `tasks/` | **禁止写入** |
-| `.manus/` | **禁止写入** |
+## 权限
 
-### 6. 终端命令规范
-- **必须统一使用 Linux/Bash 命令语法**，严禁使用 PowerShell 或 Windows 命令。
-- 正确示例：`ls -la`、`grep -r "TODO" src/`、`export API_KEY="xxx"`
-- 错误示例：`dir`、`Select-String`、`$env:API_KEY="xxx"`
+可写：实现所需的 `src/`、`tests/`、迁移、脚本、工程配置和 `CHANGELOG.md`。
 
----
+禁止写入：
 
-## Git Workflow Rules
+- `docs/PRD.md`、`docs/UserFlow.md` 与 `tasks/TASK.md`
+- `docs/architecture.md`
+- `docs/technical-specs/`
+- `docs/adr/`
+- `docs/technical-risks/`
 
-### Before Task
-必须执行：
+可以提出产品或架构变更请求，但不得把请求直接实现为未经批准的文档或代码变化。
+
+## 实现中升级
+
+若发现需要改变业务范围、验收标准、模块边界、公共接口、Schema、数据语义、安全、关键依赖、部署或非功能目标：
+
+1. 停止受影响部分；
+2. 报告证据、受影响文件、原方案、拟议变化、替代方案与风险；
+3. 产品变化交给 Manus，技术变化交给 Codex；
+4. 等待重新批准后继续。
+
+紧急程度不是绕过门禁的理由。
+
+## 工程执行
+
+- 一次只执行一个明确 Task，不顺带开发下一阶段。
+- 保持最小变更，Bug 优先复现、定位失败节点、最小修复和回归测试。
+- 运行与变更相关的 pytest、发送安全门禁测试和不会触达真实客户的隔离验证。
+- 不提交秘密、真实客户/用户数据、本机私有路径或运行产物。
+- 收到代码审查任务时检查正确性、安全、异常处理、性能、可维护性、测试与 Spec 符合性。
+
+## GitFlow
+
+统一使用 Linux/Bash：
+
 ```bash
-git status
-git branch --show-current
-git fetch origin
-git log --oneline -5
+git checkout develop
+git pull origin develop
+git checkout -b feature/task-xxx   # Bug 使用 fix/issue-xxx
 ```
 
-**Git Permissions**
-Claude is allowed to:
-- create branches
-- checkout branches
-- commit changes
-- push branches
-- create pull requests using gh CLI
+禁止直接 commit/push `main` 或 `develop`。提交必须原子化：
 
-Before destructive operations:
-- ask confirmation
-
-### Branch Rules
-**禁止直接修改 main。**
-Task必须在独立分支：
-- Feature: `feature/task-xxx`
-- Bug: `fix/issue-xxx`
-
-如果当前在 main：先创建工作分支。
-如果已经在目标分支：继续工作，不重复创建。
-
-### Commit Rules
-格式：
-- `[Claude] feat(module): description`
-- `[Claude] fix(module): description`
-- `[Claude] refactor(module): description`
-- `[Claude] test(module): description`
-
-### Commit Workflow
-Before commit, Run:
-```bash
-git status
-git diff
-```
-Then:
-```bash
-git add
-git commit
-git push
-```
-Never commit directly to main.
-
-### Push Rules
-完成修改后：
-1. 执行测试
-2. `git status`
-3. `git commit`
-4. `git push -u origin 当前分支`
-
-禁止 push main。
-
-### Pull Request
-完成任务后，使用 gh 创建 PR：
-```bash
-gh pr create
+```text
+[Claude] feat(scope): description
+[Claude] fix(scope): description
+[Claude] refactor(scope): description
+[Claude] test(scope): description
+[Claude] docs(scope): description
+[Claude] chore(scope): description
 ```
 
-### Conflict Rules
-出现 merge conflict：
-立即停止。
-输出：
-- 冲突文件
-- 当前版本
-- incoming版本
+完成后向 `develop` 创建 PR，不得直接向 `main` 创建 feature/fix PR。
 
-等待用户决定。禁止自动选择。
+出现 merge、rebase、cherry-pick 或文件语义冲突时立即停止，列出冲突文件、当前版本、incoming 版本和影响，等待用户裁决；禁止自动选择或覆盖。
 
----
+## 完成报告
 
-## 变更总结与 Debug
-
-### 每次 Task 完成后必须输出变更总结
+```text
+Task：
+修改文件：
+核心逻辑：
+测试命令与结果：
+Spec 符合性：
+潜在风险：
+架构评审：Required + 状态 / Not Required
+分支与 PR：
+下一步：
 ```
-修改文件：[列出所有改动的文件]
-核心逻辑：[这次改动的技术要点]
-潜在风险：[可能影响到的其他模块]
-下一步建议：[你认为接下来该做什么]
-```
-将总结归档到 `CHANGELOG.md`。
-
-### Debug 规则
-当用户报告 bug 时：
-**不要：**
-- 重构整个模块
-- 重新设计架构
-- 输出完整 plan
-
-**应该：**
-1. 阅读现有代码
-2. 找调用入口
-3. 分析执行路径
-4. 定位失败节点
-5. 提供最小修改
-
-**优先保持已有设计。**
-
----
-
-## 代码库指南 (Codebase Guide)
-
-### 项目概述
-AI 销售邮件自动化 Demo（家具设计行业 / GRADO 品牌）。闭环流程：从 `data/customers.csv` 读取客户 → LLM 分析销售阶段并生成个性化 HTML 邮件草稿 → 终端交互审核 → 腾讯企业邮箱 SMTP 发送 → IMAP 采集回复。
-
-### 架构（big picture）
-核心数据流：
-`customers.csv` → `interaction_analyzer.analyze()` → `template_engine` → `llm_client.complete_json()` → `email_generator.generate_all()` → 终端人工审核 → `sender.process_queue()` → `receiver.check_replies()`
-
-### 关键约定
-- **Moonshot API 坑点**：不支持 `response_format={"type": "json_schema"}`，需走 prompt 注入；部分模型 temperature 仅接受 `1.0`；base URL 必须是 `https://api.moonshot.cn/v1`。
-- `.env` 严禁提交；等号两侧不要留空格。
-- 客户语言规则：中国大陆客户用中文，海外用英文（由 prompt/skill 约束，非代码强制）。
