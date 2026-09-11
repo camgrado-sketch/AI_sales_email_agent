@@ -3,8 +3,8 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from email.mime.image import MIMEImage
 from email.header import Header
-from email.utils import make_msgid
-from datetime import datetime
+from email.utils import format_datetime, make_msgid
+from datetime import datetime, timezone
 
 import os
 
@@ -124,6 +124,12 @@ def create_email_message(draft):
     msg["From"] = config.EMAIL_ACCOUNT
     msg["To"] = recipient
     msg["Subject"] = Header(subject, "utf-8")
+
+    # RFC 5322 requires exactly one Date header with an explicit timezone.
+    # smtplib does not add one; its absence caused missing Date / 1970
+    # timestamps in delivered copies and bounces (Issue #27). Use UTC so the
+    # offset is unambiguous regardless of the host machine's local time.
+    msg["Date"] = format_datetime(datetime.now(timezone.utc))
 
     account = config.EMAIL_ACCOUNT or ""
     domain = account.split("@")[1] if "@" in account else "local"

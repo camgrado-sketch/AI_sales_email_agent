@@ -1,5 +1,18 @@
 # CHANGELOG
 
+## 2026-09-11
+
+### 修复：发送邮件缺失 Date 头（Issue #27）+ MIME 编码差异排查记录（未复现）
+
+- **修改文件**：`email_agent/sender.py`、`tests/test_sender_date_header.py`（新增）
+- **运行基线**：develop `47ca545`；`email_agent/sender.py` blob SHA `8e38f92e…` 与 Issue #27 记录一致；发送入口唯一（`sender.send_email` → `smtplib.SMTP_SSL.send_message`），无其他 SMTP 路径。
+- **问题定位（根因）**：`create_email_message()` 仅设置 From/To/Subject/Message-ID，未设置 RFC 5322 必需的 Date 头；smtplib 序列化亦不会补齐。已在本地按真实路径（构建 → Compat32 BytesGenerator 序列化 → 重新解析）复现：线上字节含 0 个 `Date:` 头，与用户原邮件副本缺 Date、退信显示 1970 时间一致。
+- **核心逻辑（最小修复）**：构建时新增 `msg["Date"] = format_datetime(datetime.now(timezone.utc))`，恰好一个、可解析、带明确时区（UTC，不受宿主机本地时区影响）、接近构建时间；Message-ID 生成与日志关联逻辑零改动。
+- **MIME 编码差异排查结论（未复现）**：当前代码走真实构建/序列化/重解析路径，`MIME-Version`、文本 part `charset=utf-8`、`Content-Transfer-Encoding: base64` 完整；中文、英文弯引号、长破折号与多语言主题往返逐字一致。**未复现**"副本缺 Content-Type/charset 及乱码"。后续核查方向：确认用户实际运行版本（旧版本代码）、退信附件重建/邮件客户端导出路径；不在构建代码上做无依据重构。新增往返断言作为编码回归防护。
+- **验证**：新测试先红后绿（修复前 3 failed/5 passed，失败项全部为 Date 断言）；修复后定向 37 passed、全量 129 passed；flake8 硬门禁（E9,F63,F7,F82）0 命中。mock SMTP 端到端验证 Date 恰好一个、日志 Message-ID 与线上字节一致；纯文本、HTML+文本、CID 图片、人工审核、限速、队列去重行为无回归（test_stage_c 等全绿）。
+- **潜在风险**：无业务行为变化，仅新增一个标准邮件头；不触及 DNS/DKIM/服务商头。SMTP 提交成功仅代表提交，不代表最终投递；本修复不承诺解除 TPG/Barracuda 拦截。
+- **待人工验收**：用户用项目向自己控制的 Gmail 发送测试邮件，在 Gmail"显示原始内容"确认 Date 正常、正文无乱码、SPF/DKIM/DMARC 三项 pass（不得以 QQMail 历史结果替代）。
+
 ## 2026-08-08
 
 ### 发布：v1.0.0 正式版（develop → main，tag v1.0.0）
